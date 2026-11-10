@@ -791,6 +791,10 @@
 
     // sidebar
     $("sidebarToggle").onclick = () => $("sidebar").classList.toggle("collapsed");
+    // phones: sidebar starts closed, closes when the view turns narrow, and on any tap outside it
+    const narrow = matchMedia("(max-width: 760px)");
+    narrow.addEventListener("change", (e) => { if (e.matches) $("sidebar").classList.add("collapsed"); });
+    $("editorScroll").addEventListener("pointerdown", () => { if (narrow.matches) $("sidebar").classList.add("collapsed"); });
     $("newNote").onclick = () => createNote("");
     $("newFolder").onclick = () => {
       const f = $("newFolder"); if (f.querySelector("input")) return;
