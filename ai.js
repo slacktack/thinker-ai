@@ -104,24 +104,35 @@
   /* ---------- the Socratic contract ---------- */
   const SYSTEM = [
     "You are Thinker, a Socratic tutor writing in the margin of someone's notebook.",
-    "Reason briefly: a few short lines, then answer.",
+    "Think in at most 4 short lines (under 60 words), then answer.",
     "Rules:",
     "- Answer the QUESTION. Older notes and thread are background only; never answer an older question again.",
     "- One move, max 45 words: the standard textbook fact or one plain sentence that makes it click, then one question.",
-    "- Use only well-established facts. If unsure, say so and ask; never invent numbers, names or formulas.",
+    "- Use only well-established facts. Never invent numbers, names or formulas.",
+    "- If they name a problem you don't know by name (e.g. a LeetCode title), don't guess: say you don't know that exact problem and ask them to paste the statement.",
+    "- If you are not sure what they mean, ask one short clarifying question instead of guessing.",
+    "- Reply in English. Only if the writer writes in Hindi or Hinglish, reply in Hinglish using Latin script.",
+    "- say is your final answer only: no thinking out loud, no 'Wait', no self-corrections.",
+    "- For coding problems give only the next hint (the idea or what to track) and a question; never the full recurrence, solution or code.",
     "- Never write their notes, full solutions or complete code. If they ask for full code, say you'll guide them instead and give the first step as a hint.",
     "- Plain text only: no LaTeX, no $ signs, no markdown. Write math like F = G m1 m2 / r^2.",
     "- If the answer has a key formula, put it in formula and explain each symbol in terms.",
     "- If the idea is a process or algorithm, put 3 to 6 steps in steps, each 6 words max, in order.",
+    "- Numbers and calculations go in work (one calculation per line, like 2^10 = 1024 outcomes), never in say. When there are numbers, say stays short reasoning, max 30 words.",
     "- draw=true when a picture helps them see it; pick the closest sketch, else none.",
-    'Output JSON only: {"say": string, "formula": string or null, "terms": [[symbol, meaning]], "steps": [string], "draw": boolean, "sketch": "' + SKETCH_KEYS.join("|") + '"}',
+    'Output JSON only: {"say": string, "title": "2-5 word note title for this topic", "formula": string or null, "terms": [[symbol, meaning]], "steps": [string], "work": [string], "draw": boolean, "sketch": "' + SKETCH_KEYS.join("|") + '"}',
   ].join("\n");
+
+  // The thinking call only gets the facts right: tiny schema, so its reasoning stays short.
+  const SYSTEM_FACTS = SYSTEM.split("\n").filter((l) => !/formula|steps|work|draw=|Output JSON|title/.test(l)).concat('Output JSON only: {"say": string}').join("\n");
 
   // Stable prefix first (note, thread) so the server's prompt cache reuses it; the changing ask goes last.
   // a hand-drawn sketch only when the question names its exact subject
   const EXACT = { twosum: /two\s?sum/i, linkedlist: /linked\s?list/i, binarysearch: /binary\s?search/i, recursion: /recursi|fibonacci|fib\(/i, nqueens: /n.?queens/i, incline: /inclin|slope|ramp/i, bigo: /big.?o\b|time complexity|space complexity/i };
   const NOTE_CHARS = 64000, HIST_TURNS = 8;
-  function buildMessages({ noteText, message, persona, intent, task, history }) {
+  function latestLine(t) { const ls = String(t || "").split(/\n+/).map((x) => x.trim()).filter(Boolean); return (ls[ls.length - 1] || "").slice(-400); }
+  function buildMessages({ noteText, message, persona, intent, task, history }, system) {
+    if (!message && latestLine(noteText)) message = latestLine(noteText);
     const hist = (history || []).slice(-HIST_TURNS).map((m) => (m.who === "you" ? "Writer: " : "Thinker: ") + truncate(m.text, 1200)).join("\n");
     let ctx = [
       noteText ? "NOTE:\n" + tail(noteText, NOTE_CHARS) : "NOTE: (empty)",
@@ -130,7 +141,7 @@
       message ? "QUESTION (answer this, not anything older): " + message : "The writer paused on the last lines of the note. Speak only if something deserves a second look.",
     ].filter(Boolean).join("\n\n");
     if (message) ctx = "QUESTION: " + message + "\n\n" + ctx;
-    return [{ role: "system", content: SYSTEM }, { role: "user", content: ctx }];
+    return [{ role: "system", content: system || SYSTEM }, { role: "user", content: ctx }];
   }
 
   function fmt(n) { return Number.isInteger(n) ? String(n).replace("-", "−") : n.toFixed(2).replace("-", "−"); }
@@ -164,16 +175,27 @@
   function tail(s, n) { s = String(s || ""); return s.length > n ? "…" + s.slice(-n) : s; }
   function truncate(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
 
-  async function respond(opts) {
+  async function respond(opts, onDraft) {
+    if (!opts.message && latestLine(opts.noteText)) opts = Object.assign({}, opts, { message: latestLine(opts.noteText) });
     await health();
     if (state.mode === "live") {
       try {
         // thinking needs room (~1k reasoning tokens); if it fails, retry fast before any offline fallback
-        const messages = buildMessages(opts);
-        const ask = (thinking) => chat({ messages, thinking, max_tokens: thinking ? 3000 : 400, temperature: 0.3, response_format: { type: "json_object" } });
-        let parsed = null;
-        try { parsed = safeJSON((await ask(true)).content); } catch (e) {}
-        if (!parsed || typeof parsed.say !== "string" || !parsed.say.trim()) parsed = safeJSON((await ask(false)).content);
+        // two concurrent calls: fast = structure (drawing, title, steps); thinking = checked wording of the answer
+        const ok = (p) => p && typeof p.say === "string" && p.say.trim();
+        const fastP = chat({ messages: buildMessages(opts), thinking: false, max_tokens: 500, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(30000) })
+          .then((r) => safeJSON(r.content)).catch(() => null);
+        const thinkP = chat({ messages: buildMessages(opts, SYSTEM_FACTS), thinking: true, max_tokens: 2500, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(45000) })
+          .then((r) => safeJSON(r.content)).catch(() => null);
+        // quickest possible first answer: same facts prompt, no thinking, tiny output
+        const quickP = onDraft ? chat({ messages: buildMessages(opts, SYSTEM_FACTS), thinking: false, max_tokens: 160, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(20000) }).then((r) => safeJSON(r.content)).catch(() => null) : null;
+        let settled = false, drafted = false;
+        const draft = (p) => { if (ok(p) && !settled && !drafted) { drafted = true; onDraft(normalize(p).say); } };
+        if (onDraft) { quickP.then(draft); fastP.then(draft); }
+        const [fast, slow] = await Promise.all([fastP, thinkP]);
+        settled = true;
+        let parsed = ok(fast) ? fast : slow;
+        if (parsed && ok(slow)) parsed = Object.assign({}, parsed, { say: slow.say });
         const recent = (opts.history || []).slice(-6).map((m) => m.text).reverse().join("\n");
         const eq = findEquation(opts.message) || (/solve|how|draw|show|graph|plot|root|factor/i.test(opts.message || "") || opts.task === "draw" || opts.task === "explain" ? findEquation(recent) || findEquation(tail(opts.noteText, 600)) : null);
         if (eq && parsed && typeof parsed.say === "string" && parsed.say.trim()) { const o = normalize(parsed); o.draw = true; o.sketch = "equation:" + eq; return o; }
@@ -183,18 +205,29 @@
           if (/#include|\bdef \w+\(|\bint main\b|\bfunction \w+\(|(;\s*\n.*){3}/.test(out.say)) {
             out.say = "I won't hand you the full code, but let's build it together. What's the simplest version that works, even if it's slow? Write that first and I'll help you sharpen it.";
           }
+          if (/\b(could you|can you|please) (share|paste|explain|clarify|give)|\bnot sure\b|\bnot familiar\b|don'?t know (that|this)/i.test(out.say)) { out.draw = false; out.sketch = "none"; return out; }
           // drawing priority: known topic from the question > formula > generic steps
           // only sketches that literally picture their topic; "flow"/"graph"/"timeline" are scene-specific
           const q = opts.message || tail(opts.noteText, 300);
           const exact = Object.keys(EXACT).find((k) => EXACT[k].test(q)), topic = exact && { sketch: exact };
           if (topic && (out.draw || CONFUSED.test(opts.message || ""))) { out.draw = true; out.sketch = topic.sketch; return out; }
-          const steps = (Array.isArray(parsed.steps) ? parsed.steps : []).map((x) => String(x).replace(/\$+/g, "").trim().slice(0, 48)).filter(Boolean).slice(0, 6);
+          let work = (Array.isArray(parsed.work) ? parsed.work : []).map((x) => fixArithmetic(String(x).replace(/\$+/g, "").trim())).filter((x) => x && /\d/.test(x)).slice(0, 8);
+          // calculations belong on the page, not in a margin paragraph
+          const sents = out.say.split(/(?<=[.!?])\s+(?=[A-Z(])/), isCalc = (x) => /\d[^.]*[=≈][^.]*\d/.test(x);
+          const calcs = sents.filter(isCalc);
+          if (calcs.length) {
+            work = work.concat(calcs.map((x) => fixArithmetic(x.trim()))).slice(0, 8);
+            const rest = sents.filter((x) => !isCalc(x)).join(" ").trim();
+            out.say = rest ? rest + " The numbers are worked out on the page." : "Worked out step by step on the page.";
+          }
+          if (work.length >= 1) { out.draw = true; out.sketch = "work:" + encodeURIComponent(JSON.stringify(work)); return out; }
+          const steps = (Array.isArray(parsed.steps) ? parsed.steps : []).map((x) => clip(String(x).replace(/\$+/g, "").trim(), 140)).filter(Boolean).slice(0, 6);
           const wantsFormula = /formula|equation|law|rule|express|derive/i.test(opts.message || "");
           if (steps.length >= 3 && !wantsFormula) { out.draw = true; out.sketch = "steps:" + encodeURIComponent(JSON.stringify(steps)); return out; }
           const f = typeof parsed.formula === "string" && /=|→|->/.test(parsed.formula) ? parsed.formula.replace(/\$+/g, "").trim() : "";
           if (f) {
-            const terms = (Array.isArray(parsed.terms) ? parsed.terms : []).filter((t) => Array.isArray(t) && t.length >= 2).slice(0, 5).map((t) => [String(t[0]).slice(0, 12), String(t[1]).slice(0, 60)]);
-            out.draw = true; out.sketch = "formula:" + encodeURIComponent(JSON.stringify({ f: f.slice(0, 60), t: terms }));
+            const terms = (Array.isArray(parsed.terms) ? parsed.terms : []).filter((t) => Array.isArray(t) && t.length >= 2).slice(0, 5).map((t) => [String(t[0]).slice(0, 12), String(t[1]).slice(0, 90)]);
+            out.draw = true; out.sketch = "formula:" + encodeURIComponent(JSON.stringify({ f: f.slice(0, 90), t: terms }));
             return out;
           }
           if (steps.length >= 3) { out.draw = true; out.sketch = "steps:" + encodeURIComponent(JSON.stringify(steps)); return out; }
@@ -204,6 +237,39 @@
       } catch (e) { /* fall through to local mind */ }
     }
     return localMind(opts);
+  }
+
+  // Recompute "a op b = c" so a small model's arithmetic slip never reaches a student.
+  function choose(n, k) { if (k < 0 || k > n || n > 170) return NaN; let r = 1; for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i; return Math.round(r); }
+  function calc(raw) {
+    const expr = String(raw).replace(/\bC\(\s*(\d+)\s*,\s*(\d+)\s*\)|\b(\d+)\s*C\s*(\d+)\b/g, (m, a, b, c, d) => String(choose(+(a || c), +(b || d))));
+    const e = expr.replace(/[×x·](?=\s*[\d(])/g, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/,(?=\d{3})/g, "");
+    if (/^\s*\d+\s*$/.test(e) && /C\(|\dC\d/.test(raw)) return +e;
+    if (!/^[\d\s.+\-*/()]+$/.test(e) || !/[+\-*/]/.test(e)) return null;
+    try { const v = Function('"use strict";return (' + e + ")")(); return Number.isFinite(v) ? v : null; } catch (err) { return null; }
+  }
+  function fixArithmetic(line) {
+    // "total = 2^10" or "C(10,5)" with no result: append the value
+    line = line.replace(/(=\s*)((?:C\(\s*\d+\s*,\s*\d+\s*\)|\d+(?:\.\d+)?(?:\s*[+\-*/^×÷]\s*\d+(?:\.\d+)?)+))(?!\s*=)(?=\s*(?:[a-zA-Z.,;]|$))/g, (m, eq, ex) => { const v = calc(ex); return v == null ? m : eq + ex + " = " + (Number.isInteger(v) ? v : +v.toFixed(4)); });
+    line = line.replace(/(:\s*|is\s+)(C\(\s*\d+\s*,\s*\d+\s*\))(?!\s*=)/g, (m, pre, ex) => { const v = calc(ex); return v == null ? m : pre + ex + " = " + v; });
+    return line.replace(/((?:\d[\d.,]*|\(|C\()[\d.,\s+\-*/^×x·÷()C]*[\d)])\s*=\s*(-?\d[\d.,]*)/g, (m, lhs, rhs) => {
+      const v = calc(lhs); if (v == null) return m;
+      const r = +rhs.replace(/,/g, ""); if (Math.abs(v - r) < 1e-9 * Math.max(1, Math.abs(v))) return m;
+      return lhs + " = " + (Number.isInteger(v) ? v : +v.toFixed(4));
+    });
+  }
+  function clip(t, n) { return t.length <= n ? t : t.slice(0, n).replace(/\s+\S*$/, "") + "…"; }
+  function tidy(say) {
+    const cut = say.search(/\s*\(?\b(Wait|Actually|Hmm)\b[:,]?\s/);
+    if (cut > 0) {
+      say = say.slice(0, cut).trim();
+      if ((say.match(/\(/g) || []).length > (say.match(/\)/g) || []).length) say = say.slice(0, say.lastIndexOf("(")).trim();
+      if (!/[.!?]$/.test(say)) say += ".";
+    }
+    const sents = say.split(/(?<=[.!?])\s+(?=[A-Z(])/);
+    let out = "";
+    for (const x of sents) { if ((out + " " + x).split(/\s+/).length > 70 && out) break; out = (out + " " + x).trim(); }
+    return out;
   }
 
   function safeJSON(s) {
@@ -216,7 +282,7 @@
   function normalize(p) {
     let sketch = SKETCH_KEYS.includes(p.sketch) ? p.sketch : "none";
     const draw = !!p.draw && sketch !== "none";
-    return { say: String(p.say).replace(/\$+/g, "").replace(/\\\(|\\\)/g, "").trim(), draw, sketch: draw ? sketch : "none", source: "live" };
+    return { title: typeof p.title === "string" ? p.title.replace(/["$]/g, "").trim().slice(0, 48) : "", say: tidy(String(p.say).replace(/\$+/g, "").replace(/\\\(|\\\)/g, "").trim()), draw, sketch: draw ? sketch : "none", source: "live" };
   }
 
   /* ---------- contextual local mind (offline fallback) ----------
@@ -546,27 +612,55 @@
     }
 
     if (/^equation:/.test(key)) return eqSVG(key.slice(9));
+    if (/^work:/.test(key)) {
+      let ws; try { ws = JSON.parse(decodeURIComponent(key.slice(5))); } catch (e) { ws = []; }
+      const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      let o = '<text class="label fade d1" x="20" y="22">Worked example</text>', y = 34;
+      ws.forEach((line, i) => {
+        const k = 2 * i + 2, eq = line.lastIndexOf("="), lhs = eq > 0 ? line.slice(0, eq + 1) : line, rhs = eq > 0 ? line.slice(eq + 1).trim() : "";
+        const words = lhs.split(/\s+/), ls = []; let cur = "";
+        words.forEach((w) => { if ((cur + " " + w).trim().length > 40 && cur) { ls.push(cur); cur = w; } else cur = (cur + " " + w).trim(); });
+        if (cur) ls.push(cur);
+        o += '<g class="d' + k + '"><text class="label small fade d' + k + '" x="20" y="' + (y + 18) + '">' + (i + 1) + "</text>";
+        ls.forEach((l, j) => { o += '<text class="label fade d' + k + '" x="40" y="' + (y + 18 + j * 20) + '">' + e(l) + (j === ls.length - 1 && rhs ? ' <tspan class="work-rhs">' + e(rhs) + "</tspan>" : "") + "</text>"; });
+        y += ls.length * 20 + 12;
+        o += '<path class="stroke draw d' + k + '" ' + P + ' d="M40 ' + (y - 4) + ' H380" style="opacity:.18"/></g>';
+      });
+      return wrap(o, "0 0 400 " + (y + 6));
+    }
     if (/^steps:/.test(key)) {
       let st; try { st = JSON.parse(decodeURIComponent(key.slice(6))); } catch (e) { st = []; }
       const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-      let o = "";
+      const wrapText = (t, n) => { const out = []; let cur = ""; String(t).split(/\s+/).forEach((w) => { if ((cur + " " + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }); if (cur) out.push(cur); return out; };
+      let o = "", y = 10;
       st.forEach((t, i) => {
-        const y = 14 + i * 56, w = Math.min(360, Math.max(120, t.length * 7.4 + 44)), k = 2 * i + 1;
-        o += '<g class="d' + k + '"><rect class="stroke node-bg draw d' + k + '" ' + P + ' x="20" y="' + y + '" width="' + w + '" height="34" rx="9"/>' +
-          '<text class="label small fade d' + k + '" x="32" y="' + (y + 21) + '" style="font-size:11px">' + (i + 1) + '</text><text class="label fade d' + k + '" x="48" y="' + (y + 22) + '">' + e(t) + "</text></g>";
-        if (i < st.length - 1) o += '<path class="stroke draw d' + (k + 1) + '" ' + P + ' d="M44 ' + (y + 36) + " v16 M39 " + (y + 46) + " L44 " + (y + 53) + " L49 " + (y + 46) + '"/>';
+        const ls = wrapText(t, 42), h = 16 + ls.length * 19, w = Math.min(370, Math.max(140, Math.max(...ls.map((l) => l.length)) * 7.6 + 56)), k = 2 * i + 1;
+        o += '<g class="d' + k + '"><rect class="stroke node-bg draw d' + k + '" ' + P + ' x="16" y="' + y + '" width="' + w + '" height="' + h + '" rx="9"/>' +
+          '<text class="label small fade d' + k + '" x="28" y="' + (y + 22) + '" style="font-size:11px">' + (i + 1) + "</text>";
+        ls.forEach((l, j) => { o += '<text class="label fade d' + k + '" x="44" y="' + (y + 23 + j * 19) + '">' + e(l) + "</text>"; });
+        o += "</g>";
+        y += h;
+        if (i < st.length - 1) { o += '<path class="stroke draw d' + (k + 1) + '" ' + P + ' d="M40 ' + (y + 2) + " v16 M35 " + (y + 12) + " L40 " + (y + 19) + " L45 " + (y + 12) + '"/>'; y += 22; }
       });
-      return wrap(o, "0 0 400 " + (st.length * 56 + 8));
+      return wrap(o, "0 0 400 " + (y + 8));
     }
     if (/^formula:/.test(key)) {
       let d; try { d = JSON.parse(decodeURIComponent(key.slice(8))); } catch (e) { d = { f: "", t: [] }; }
       const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-      let o = '<text class="label fade d1" x="20" y="22">The formula</text><text class="label formula fade d1" x="20" y="58">' + e(d.f) + "</text>" + underline(20, 68, Math.min(360, d.f.length * 11 + 20), "d2");
+      const lines = [], words = String(d.f).split(" "); let cur = "";
+      words.forEach((w) => { if ((cur + " " + w).trim().length > 30 && cur) { lines.push(cur); cur = w; } else cur = (cur + " " + w).trim(); });
+      if (cur) lines.push(cur);
+      let o = '<text class="label fade d1" x="20" y="22">The formula</text>';
+      lines.forEach((l, i) => { o += '<text class="label formula fade d1" x="20" y="' + (56 + i * 30) + '">' + e(l) + "</text>"; });
+      const top = 56 + (lines.length - 1) * 30;
+      o += underline(20, top + 10, Math.min(360, Math.max(...lines.map((l) => l.length)) * 11 + 10), "d2");
+      const symW = Math.min(150, Math.max(24, ...(d.t || []).map(([sym]) => String(sym).length * 9.5)));
       (d.t || []).forEach(([sym, mean], i) => {
-        const y = 108 + i * 32, k = 2 * i + 3;
-        o += '<text class="label big fade d' + k + '" x="30" y="' + y + '">' + e(sym) + '</text><path class="stroke draw d' + k + '" ' + P + ' d="M70 ' + (y - 5) + ' h18" style="opacity:.5"/><text class="label fade d' + k + '" x="96" y="' + y + '">' + e(mean) + "</text>";
+        const y = top + 50 + i * 32, k = 2 * i + 3;
+        o += '<text class="label big fade d' + k + '" x="30" y="' + y + '">' + e(sym) + '</text><path class="stroke draw d' + k + '" ' + P + ' d="M' + (38 + symW) + " " + (y - 5) + ' h14" style="opacity:.5"/><text class="label fade d' + k + '" x="' + (60 + symW) + '" y="' + y + '">' + e(mean) + "</text>";
       });
-      return wrap(o, "0 0 400 " + (96 + (d.t || []).length * 32));
+      const W = Math.max(400, ...(d.t || []).map(([, m]) => 70 + symW + String(m).length * 7.6), ...lines.map((l) => 40 + l.length * 12));
+      return wrap(o, "0 0 " + Math.ceil(W) + " " + (top + 40 + (d.t || []).length * 32));
     }
     function eqSVG(src) {
       const q = parseEquation(src); if (!q) return wrap('<text class="label fade d1" x="20" y="30">Couldn\'t read that equation.</text>', "0 0 400 60");

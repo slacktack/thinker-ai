@@ -92,8 +92,10 @@
   function toggleTheme() { db.theme = db.theme === "dark" ? "light" : "dark"; applyTheme(); save(); }
 
   /* ---------------- view routing ---------------- */
-  function go(view) {
-    const landing = $("landing"), app = $("app");
+  function go(view, fromHistory) {
+    const landing = $("landing"), app = $("app"), path = view === "app" ? "/chat" : "/";
+    if (!fromHistory && location.pathname !== path) history.pushState({ view }, "", path + location.search);
+    document.title = view === "app" ? "Thinker · Chat" : "Thinker — a notebook that thinks with you";
     if (view === "app") {
       landing.classList.add("hidden"); app.classList.add("active");
       if (window.matchMedia("(max-width: 760px)").matches) $("sidebar").classList.add("collapsed");
@@ -111,8 +113,11 @@
   /* ---------------- sidebar ---------------- */
   function renderSidebar() {
     const list = $("noteList"); list.innerHTML = "";
-    const sorted = db.notes.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+    // loose notes first, then each folder under its own label
+    const sorted = db.notes.slice().sort((a, b) => (a.folder || "").localeCompare(b.folder || "") || b.updatedAt - a.updatedAt);
+    let group = "";
     sorted.forEach((n) => {
+      if ((n.folder || "") !== group) { group = n.folder || ""; const g = document.createElement("div"); g.className = "note-group"; g.textContent = group; list.appendChild(g); }
       const b = document.createElement("button");
       b.className = "note-item" + (n.id === activeId ? " active" : "");
       b.innerHTML = '<svg><use href="#i-file"/></svg><span class="title">' + esc(n.title || "Untitled") + '</span><span class="dot"></span><span class="note-del" role="button" tabindex="0" aria-label="Delete note" title="Delete"><svg><use href="#i-trash"/></svg></span>';
@@ -215,17 +220,27 @@
     const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = r.persona || "Thinker"; body.appendChild(meta);
     const chip = document.createElement("button"); chip.className = "follow-chip";
     chip.innerHTML = 'Follow the thought <svg><use href="#i-arrow"/></svg>';
-    chip.onclick = (ev) => { ev.stopPropagation(); openThread(r.id); };
+    chip.onclick = (ev) => { ev.stopPropagation(); replyTo(r.id); };
     body.appendChild(chip);
-    card.appendChild(dot); card.appendChild(body);
+    card._rid = r.id; card.appendChild(dot); card.appendChild(body);
     if (instant) text.textContent = r.text.replace(/\$+/g, ""); else AI.revealWords(text, r.text);
-    card.onclick = () => openThread(r.id);
+    card.onclick = () => replyTo(r.id);
     return card;
   }
 
   function inkVar(ink) { return { ink: "var(--ink)", blue: "var(--blue)", green: "var(--green)", purple: "var(--purple)", orange: "var(--orange)" }[ink] || "var(--ink)"; }
 
+  let replyId = null;
+  function replyTo(rid) {
+    const r = active().responses.find((x) => x.id === rid); if (!r) return;
+    replyId = rid;
+    document.querySelectorAll(".margin-card.replying").forEach((c) => c.classList.remove("replying"));
+    const card = [...document.querySelectorAll(".margin-card")].find((c) => c._rid === rid); if (card) card.classList.add("replying");
+    const inp = $("composerInput"); inp.placeholder = "Reply to “" + shorten(r.text) + "”"; inp.focus();
+  }
+  function clearReply() { replyId = null; document.querySelectorAll(".margin-card.replying").forEach((c) => c.classList.remove("replying")); $("composerInput").placeholder = PH(); }
   function noteHistory(n) {
+    if (replyId) { const r = n.responses.find((x) => x.id === replyId); if (r) return [{ who: "riddler", text: r.text }].concat(r.thread || []); }
     const h = [];
     n.responses.slice(-3).forEach((r) => { h.push({ who: "riddler", text: r.text }); (r.thread || []).forEach((m) => h.push(m)); });
     return h;
@@ -238,6 +253,7 @@
   function readingCue(on) {
     let c = $("readingCue");
     if (!on) { if (c) c.remove(); return; }
+    const em = $("marginCol").querySelector(".margin-empty"); if (em) em.remove();
     if (!c) { c = document.createElement("div"); c.id = "readingCue"; c.className = "reading-cue"; c.innerHTML = '<svg class="quill"><use href="#i-quill"/></svg><span>Reading along. Pause and I\'ll reply here.</span>'; $("marginCol").appendChild(c); }
     clearTimeout(c._t); c._t = setTimeout(() => readingCue(false), 4000);
   }
@@ -251,8 +267,14 @@
     const empty = col.querySelector(".margin-empty"); if (empty) empty.remove();
 
     if (opts.message) {
+      // a long paste is a problem statement: it belongs in the note, the margin shows a preview
+      const long = opts.message.length > 240;
+      if (long) {
+        const p = document.createElement("blockquote"); p.className = "pasted-problem"; p.textContent = opts.message;
+        $("noteBody").appendChild(p); n.body = serializeBody(); save();
+      }
       const you = document.createElement("div"); you.className = "margin-you enter";
-      you.innerHTML = '<span class="you-label">You</span>' + (opts.image ? '<img class="you-img" alt="Your image" src="' + opts.image + '">' : "") + "<span>" + esc(opts.message) + "</span>";
+      you.innerHTML = '<span class="you-label">You</span>' + (opts.image ? '<img class="you-img" alt="Your image" src="' + opts.image + '">' : "") + "<span>" + esc(long ? opts.message.slice(0, 110).trim() + "…" : opts.message) + "</span>" + (long ? '<span class="you-note">Added to your note</span>' : "");
       col.appendChild(you);
     }
 
@@ -269,9 +291,18 @@
       catch (e) { toast("Couldn't read the image. Answering from your words."); }
     }
     try {
-      res = await AI.respond({ noteText: plainText(n.body), message, persona: personaName(n.persona), intent: n.intent, task: opts.task || "margin", history: hist });
+      res = await AI.respond({ noteText: plainText(n.body), message, persona: personaName(n.persona), intent: n.intent, task: opts.task || "margin", history: hist }, (draft) => {
+        // show the quick take now; the thought-through answer replaces it
+        const st = card.querySelector(".status-line"); if (!st) return;
+        let d = card.querySelector(".draft-text"); if (!d) { d = document.createElement("span"); d.className = "draft-text"; st.before(d); }
+        d.textContent = draft; st.querySelector(".dots").textContent = "Double-checking";
+      });
     } catch (e) { res = AI.localMind({ noteText: plainText(n.body), message, intent: n.intent, task: opts.task, history: hist }); }
 
+    if ((!n.title || n.title === "Untitled") && (res.title || message)) {
+      n.title = res.title || message.split(/\s+/).slice(0, 6).join(" ").replace(/[?.!,:;-]+$/, "");
+      $("noteTitle").textContent = n.title; renderSidebar();
+    }
     const r = { id: uid(), text: res.say, sketch: res.sketch, draw: res.draw, persona: personaName(n.persona), ink: n.ink, thread: [], revealed: true };
     if (opts.message) r.thread.push({ who: "you", text: opts.message });
     n.responses.push(r);
@@ -285,10 +316,10 @@
     const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = r.persona; body.appendChild(meta);
     const chip = document.createElement("button"); chip.className = "follow-chip";
     chip.innerHTML = 'Follow the thought <svg><use href="#i-arrow"/></svg>';
-    chip.onclick = (ev) => { ev.stopPropagation(); openThread(r.id); };
+    chip.onclick = (ev) => { ev.stopPropagation(); replyTo(r.id); };
     body.appendChild(chip);
-    card.appendChild(dot); card.appendChild(body);
-    card.onclick = () => openThread(r.id);
+    card.appendChild(dot); card.appendChild(body); card._rid = r.id;
+    card.onclick = () => replyTo(r.id);
     await AI.revealWords(text, r.text).done;
 
     const lastSk = [...$("noteBody").querySelectorAll("[data-sketch]")].pop();
@@ -444,6 +475,7 @@
 
   function composerSubmit() {
     const inp = $("composerInput"); let v = inp.value.trim();
+    setTimeout(clearReply, 0);
     if (pendingImg) { const image = pendingImg; clearImage(); inp.value = ""; think({ task: "chat", message: v || "What do you make of this?", image }); return; }
     if (!v) return;
     if (v.startsWith("/")) {
@@ -781,7 +813,7 @@
     $("briefInput").oninput = (e) => { active().brief = e.target.value; save(); };
     $("modeBtn").onclick = () => { const n = active(); n.mode = n.mode === "with" ? "ask" : "with"; $("modeName").textContent = n.mode === "with" ? "Thinks with you" : "When you ask"; $("modeBtn").querySelector(".bulb").style.color = n.mode === "with" ? "var(--accent)" : "var(--faint)"; save(); renderMargin(true); toast(n.mode === "with" ? "Thinker reads along." : "Quiet until you ask."); };
     $("shareBtn").onclick = openShare;
-    $("chatBtn").onclick = openChat;
+    $("chatBtn").onclick = () => { clearReply(); $("composerInput").focus(); };
 
     // editor input
     $("noteTitle").oninput = () => { active().title = $("noteTitle").textContent; active().updatedAt = Date.now(); save(); renderSidebar(); };
@@ -858,7 +890,7 @@
       else if (mod && e.key === ",") { e.preventDefault(); if ($("app").classList.contains("active")) openCustomize(); }
       else if (mod && e.shiftKey && e.key.toLowerCase() === "c") { e.preventDefault(); copyText(plainText(active().body)); toast("Note copied."); }
       else if (mod && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); exportNote(); }
-      else if (e.key === "Escape") { closeModal(); closePalette(); showDrawer(false); $("cmdMenu").classList.remove("open"); }
+      else if (e.key === "Escape") { closeModal(); closePalette(); showDrawer(false); clearReply(); $("cmdMenu").classList.remove("open"); }
       else if (e.altKey && e.code === "Space" && $("app").classList.contains("active")) { e.preventDefault(); toggleListening(); }
     });
   }
@@ -870,7 +902,8 @@
     selectScene("building"); playCustom();
     mountSketch($("landingSketch"), "recursion");
     startSceneCycle();
-    go("landing");
+    go(/^\/chat\/?$/.test(location.pathname) ? "app" : "landing", true);
+    addEventListener("popstate", () => go(/^\/chat\/?$/.test(location.pathname) ? "app" : "landing", true));
     refreshConn();
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
