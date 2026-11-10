@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+<title>Thinker — a notebook that thinks with you</title>
+<meta name="description" content="You write. Thinker questions, explains and draws, right beside your words. A notebook that makes you think better." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Caveat:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23e9e7e2' d='M16 3c5 4 9 7 9 13a9 9 0 1 1-18 0c0-6 4-9 9-13z'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- ===== SVG icon sprite ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-blot" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2c3.6 3 6.6 5.4 6.6 9.8a6.6 6.6 0 1 1-13.2 0C5.4 7.4 8.4 5 12 2z"/><circle cx="19" cy="6" r="1.1" fill="currentColor" opacity=".7"/><circle cx="5" cy="18" r="0.9" fill="currentColor" opacity=".5"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 18h6m-5 3h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.3 2.2h4.6c.2-.9.6-1.6 1.3-2.2A6 6 0 0 0 12 3z"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.7"/><path stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M14 3v5h5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M12 11v6m-3-3h6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M5 15V5a1 1 0 0 1 1-1h9"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 15V3m0 12-4-4m4 4 4-4M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.7"/><path stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-5.2A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/></symbol>
+    <symbol id="i-quill" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M20 4c-6 0-12 4-14 12l-2 4 4-2c8-2 12-8 12-14zM6 16l4-4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M7 17 17 7M9 7h8v8"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0-6 6m6-6 6 6"/></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 17H7a4 4 0 0 1 0-8h10m0 0-4-4m4 4-4 4"/></symbol>
+    <filter id="tdChalk" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="1.6" xChannelSelector="R" yChannelSelector="G"/></filter>
+  </defs>
+</svg>
+
+<!-- ============================ LANDING ============================ -->
+<div class="landing" id="landing">
+  <header class="site-nav" id="siteNav">
+    <a class="brand" href="#" data-go="landing"><svg class="ink-blot"><use href="#i-blot"/></svg>thinker.</a>
+    <nav class="nav-links">
+      <button class="icon-btn" id="themeToggle" title="Switch between light and dark" aria-label="Switch between light and dark"><svg><use href="#i-sun"/></svg></button>
+      <a class="btn small" href="#" data-go="app">Start writing</a>
+    </nav>
+  </header>
+
+  <main class="landing-main">
+    <section class="hero">
+      <div class="hero-hand" id="heroHand" aria-label="Just give me a try.">
+        <span class="hand-blot" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-blot"/></svg></span>
+        <span class="hand-write" aria-hidden="true">Just give me a try.</span>
+        <svg class="hand-arrow" viewBox="0 0 60 44" aria-hidden="true"><path pathLength="1" d="M2 40 C 24 40, 42 30, 50 12 M43 17 L 50 11 L 55 19"/></svg>
+      </div>
+      <h1 class="hero-title">A notebook that thinks with you.</h1>
+      <div class="hero-row">
+        <div class="hero-pitch">
+          You write. Thinker questions, explains and draws, right beside your words.
+          <a class="btn" href="#" data-go="app">Start writing</a>
+          <span class="free">Free to start.</span>
+        </div>
+        <div class="hero-stage">
+          <div class="hero-tabs" role="tablist" id="heroTabs">
+            <button class="pill-tab" role="tab" aria-selected="true" data-scene="building">Building</button>
+            <button class="pill-tab" role="tab" aria-selected="false" data-scene="leetcode">LeetCoding</button>
+            <button class="pill-tab" role="tab" aria-selected="false" data-scene="studying">Studying</button>
+            <button class="pill-tab" role="tab" aria-selected="false" data-scene="anything">Anything else</button>
+          </div>
+          <div class="stage" id="heroStage"><!-- driven by app.js --></div>
+        </div>
+        <div class="margin-note hero-margin" id="heroMargin"><!-- driven by app.js --></div>
+      </div>
+    </section>
+
+    <section class="flow-section">
+      <div class="flow-head reveal">
+        <h2>Follow the thought.</h2>
+        <p>Open any thought and see where it goes. Ask why, push back, keep going until it makes sense.</p>
+      </div>
+      <div class="thread-demo reveal" id="threadDemo">
+        <svg class="td-line" aria-hidden="true"><path pathLength="1" d=""/></svg>
+        <p class="td-start"><span>Users never read the onboarding emails, so we can drop them.</span></p>
+        <div class="td-node r" style="--i:0"><span class="td-dot"></span><span>Never read, or never act? What does your open rate say?</span></div>
+        <div class="td-node u" style="--i:1;--indent:20px"><span class="td-dot"></span><span>Fine, 30% open them. But nobody clicks.</span></div>
+        <div class="td-node r" style="--i:2"><span class="td-dot"></span><span>So opening isn't the problem. What is each email asking them to do?</span></div>
+        <div class="td-node u" style="--i:3;--indent:60px"><span class="td-dot"></span><span>Set up their first project. It's a six-step checklist.</span></div>
+        <div class="td-node r" style="--i:4"><span class="td-dot"></span><span>Six asks in one email. Which single step predicts who stays?</span></div>
+        <div class="td-node u" style="--i:5;--indent:100px"><span class="td-dot"></span><span>Inviting a teammate. Teams that do it almost never leave.</span></div>
+        <p class="td-end">People open the onboarding emails. Make each one ask for one thing: invite a teammate.</p>
+        <p class="td-foot">Back in the note, better than it started.</p>
+      </div>
+    </section>
+
+    <section class="flow-section">
+      <div class="flow-head reveal">
+        <h2>When words won't do, it draws.</h2>
+        <p>Stuck picturing something? Thinker sketches it in ink, step by step, right under your words. Or select anything and ask it to draw it.</p>
+      </div>
+      <div class="reveal" style="max-width:620px">
+        <div class="setup-row">
+          <span class="seg"><svg class="ink-blot"><use href="#i-blot"/></svg>Thinker</span>
+          <span class="seg"><svg class="bulb"><use href="#i-bulb"/></svg>Thinks with you <svg class="chev"><use href="#i-chev"/></svg></span>
+        </div>
+        <div class="setup-row" style="margin-top:-6px"><span class="seg"><svg class="pen"><use href="#i-pen"/></svg>Tell Thinker <span class="brief-goal">CS midterm Friday.</span></span></div>
+        <h3 class="note-h2">Recursion</h3>
+        <p class="note-text">I get that fib(n) = fib(n-1) + fib(n-2) calls itself, but I can't picture how it actually returns the answer.</p>
+        <div class="sketch-wrap"><div class="sketch" id="landingSketch"></div></div>
+      </div>
+    </section>
+
+    <section class="flow-section">
+      <div class="flow-head reveal">
+        <h2>Thinks with you. Or waits to be asked.</h2>
+        <p>Thinks with you: it reads along and speaks up. When you ask: it stays quiet until you call on it. Switch any note, anytime.</p>
+      </div>
+      <div class="reveal" style="max-width:620px">
+        <div class="setup-row">
+          <span class="seg"><svg class="ink-blot"><use href="#i-blot"/></svg>Thinker</span>
+          <span class="seg" style="color:var(--faint)"><svg class="bulb" style="color:var(--faint)"><use href="#i-bulb"/></svg>When you ask <svg class="chev"><use href="#i-chev"/></svg></span>
+        </div>
+        <div class="setup-row" style="margin-top:-6px"><span class="seg"><svg class="pen"><use href="#i-pen"/></svg>Tell Thinker <span class="brief-goal">Ship search this sprint.</span></span></div>
+        <p class="note-text">The new search page loads every product, then filters them in the browser.</p>
+        <button class="btn ghost small" style="margin-top:18px" data-go="app"><svg style="width:15px;height:15px"><use href="#i-spark"/></svg>Ask Thinker</button>
+      </div>
+    </section>
+
+    <section class="flow-section">
+      <div class="flow-head reveal">
+        <h2>Bring in the expert.</h2>
+        <p>Make a Thinker persona that thinks like the best reviewer you know. Same sentence, four different minds. Make as many as you like.</p>
+      </div>
+      <p class="note-text reveal" style="max-width:620px;margin-bottom:32px">We'll cache every user's feed in Redis so the home page loads instantly.</p>
+      <div class="riddler-grid reveal">
+        <div class="riddler-card"><div class="name">Staff engineer</div><div class="q"><span class="ink-dot"></span><span>What happens to the cache when someone with 50,000 followers posts?</span></div></div>
+        <div class="riddler-card"><div class="name">Editor</div><div class="q"><span class="ink-dot"></span><span>Who's this for? Instantly to whom, and compared to what?</span></div></div>
+        <div class="riddler-card"><div class="name">Investor</div><div class="q"><span class="ink-dot"></span><span>Does fast load time move retention, or is it a nice-to-have?</span></div></div>
+        <div class="riddler-card"><div class="name">Professor</div><div class="q"><span class="ink-dot"></span><span>Why Redis? What property of the problem makes it the right tool?</span></div></div>
+      </div>
+    </section>
+
+    <section class="flow-section">
+      <div class="flow-head reveal">
+        <h2>Make it yours.</h2>
+        <p>Tell Thinker what any note is for, or how to be in it, in your own words: "Quiz me before Friday," "Just let me vent," "Very funny." And pick the ink it writes in.</p>
+      </div>
+      <div class="custom-demo reveal">
+        <div>
+          <span class="custom-note">I'm going to quit my job next month and go full time on the app.</span>
+          <div class="intent-row" id="intentRow" role="radiogroup" aria-label="How should Thinker be">
+            <button class="pill-tab" role="radio" aria-checked="true" data-intent="challenge">Talk me out of bad ideas</button>
+            <button class="pill-tab" role="radio" aria-checked="false" data-intent="plan">I've decided. Help me plan</button>
+            <button class="pill-tab" role="radio" aria-checked="false" data-intent="vent">Just let me vent</button>
+            <button class="pill-tab" role="radio" aria-checked="false" data-intent="brutal">Be brutal</button>
+          </div>
+          <div class="ink-row" id="inkRow" role="radiogroup" aria-label="Ink color">
+            <button class="ink-swatch" role="radio" aria-checked="true" aria-label="Ink" data-ink="ink" style="background:#2a2824"></button>
+            <button class="ink-swatch" role="radio" aria-checked="false" aria-label="Blue" data-ink="blue" style="background:#33689c"></button>
+            <button class="ink-swatch" role="radio" aria-checked="false" aria-label="Green" data-ink="green" style="background:#47763d"></button>
+            <button class="ink-swatch" role="radio" aria-checked="false" aria-label="Purple" data-ink="purple" style="background:#774f9c"></button>
+            <button class="ink-swatch" role="radio" aria-checked="false" aria-label="Orange" data-ink="orange" style="background:#b5621f"></button>
+          </div>
+        </div>
+        <div class="custom-response" id="customResponse"><span class="ink-dot"></span><span id="customResponseText"></span></div>
+      </div>
+    </section>
+
+    <section class="band">
+      <h2>It won't think for you.</h2>
+      <p>It won't rewrite your notes, hand you every answer, or interrupt every passing thought. The page is yours. Thinker just asks the questions you might have missed.</p>
+    </section>
+
+    <section class="close-cta">
+      <h2>See where your thoughts take you.</h2>
+      <a class="btn" href="#" data-go="app">Start writing</a>
+      <span class="free">Free to start. Your notes stay yours.</span>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <a class="brand" href="#" data-go="landing" style="font-size:20px"><svg class="ink-blot" style="width:15px;height:15px"><use href="#i-blot"/></svg>thinker.</a>
+    <div class="links">
+      <a href="#" data-go="app">Start writing</a><a href="#" id="footPrivacy">Privacy</a>
+    </div>
+    <span class="copy">© 2026 Thinker · powered by your own LFM3</span>
+  </footer>
+
+  <div class="idle-whisper" id="idleWhisper"><svg class="ink-blot" style="width:11px;height:11px"><use href="#i-blot"/></svg><span id="idleText">Still there? Take your time.</span><span class="caret"></span></div>
+</div>
+
+<!-- ============================ APP ============================ -->
+<div class="app" id="app">
+  <div class="app-topbar">
+    <div class="topbar-left">
+      <button class="icon-btn" id="sidebarToggle" title="Toggle sidebar" aria-label="Toggle sidebar"><svg><use href="#i-menu"/></svg></button>
+      <a class="brand" href="#" data-go="landing"><svg class="ink-blot"><use href="#i-blot"/></svg>thinker.</a>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" id="appThemeToggle" title="Toggle theme" aria-label="Toggle theme"><svg><use href="#i-sun"/></svg></button>
+      <button class="btn ghost small" id="chatBtn"><svg style="width:15px;height:15px"><use href="#i-chat"/></svg>Chat</button>
+    </div>
+  </div>
+
+  <div class="app-body">
+    <aside class="sidebar" id="sidebar">
+      <button class="side-search" id="openPalette"><svg style="width:16px;height:16px"><use href="#i-search"/></svg>Find or start a note <kbd>⌘K</kbd></button>
+      <button class="side-new" id="newNote"><svg style="width:16px;height:16px"><use href="#i-plus"/></svg>New note</button>
+      <div class="side-label">Notes</div>
+      <div class="note-list" id="noteList"></div>
+      <button class="side-folder" id="newFolder"><svg style="width:16px;height:16px"><use href="#i-folder"/></svg>New folder</button>
+      <div class="side-foot">
+        <div class="side-account">
+          <div class="email" id="accountEmail">you@local</div>
+          <div class="saved"><svg style="width:12px;height:12px;color:var(--ok)"><use href="#i-check"/></svg><span id="saveState">All notes saved</span></div>
+        </div>
+        <button class="side-action" id="actCopy"><svg><use href="#i-copy"/></svg>Copy this note <kbd>⌘⇧C</kbd></button>
+        <button class="side-action" id="actExport"><svg><use href="#i-export"/></svg>Export this note <kbd>⌘⇧E</kbd></button>
+        <button class="side-action" id="actJustWords"><svg><use href="#i-pen"/></svg>Just my words <kbd>⌘⇧.</kbd></button>
+        <button class="side-action" id="actCustomize"><svg><use href="#i-spark"/></svg>Customize Thinker <kbd>⌘,</kbd></button>
+        <button class="side-action" id="actPersonas"><svg><use href="#i-blot"/></svg>Personas</button>
+        <button class="side-action" id="actDelete"><svg><use href="#i-trash"/></svg>Delete note</button>
+      </div>
+    </aside>
+
+    <div class="editor-scroll" id="editorScroll">
+      <div class="editor-canvas">
+        <div class="editor-main">
+          <div class="editor-setup">
+            <button class="setup-btn" id="personaBtn"><svg class="ink-blot"><use href="#i-blot"/></svg><span id="personaName">Thinker</span><svg class="chev"><use href="#i-chev"/></svg></button>
+            <button class="setup-btn" id="briefBtn"><svg class="pen"><use href="#i-pen"/></svg>Tell Thinker</button>
+            <input class="setup-brief-input" id="briefInput" placeholder="what's this note for?" />
+            <button class="setup-btn" id="modeBtn"><svg class="bulb"><use href="#i-bulb"/></svg><span id="modeName">Thinks with you</span><svg class="chev"><use href="#i-chev"/></svg></button>
+            <button class="setup-btn" id="shareBtn"><svg class="pen" style="width:14px;height:14px"><use href="#i-share"/></svg>Share</button>
+          </div>
+          <h1 class="note-title" id="noteTitle" contenteditable="true" spellcheck="false"></h1>
+          <div class="note-body" id="noteBody" contenteditable="true" spellcheck="true"></div>
+        </div>
+        <div class="margin-col" id="marginCol"></div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-coach" id="composerCoach"><svg style="width:14px;height:14px"><use href="#i-spark"/></svg><span>Write in the note above — Thinker reads along. Or <b>ask it anything here</b>, then tap a reply to keep going.</span><button id="coachDismiss">got it</button></div>
+        <div class="composer-inner">
+          <button class="mic-btn" id="attachBtn" title="Add an image (or paste / drop one)" aria-label="Add an image"><svg><use href="#i-plus"/></svg></button>
+          <input type="file" id="attachInput" accept="image/*" hidden />
+          <span class="attach-chip" id="attachChip" hidden><img alt="Attached image" /><button aria-label="Remove image">×</button></span>
+          <button class="mic-btn" id="micBtn" title="Speak (or hold ⌥)" aria-label="Speak to Thinker"><svg><use href="#i-mic"/></svg></button>
+          <input class="composer-input" id="composerInput" placeholder="Ask Thinker anything…   ( / for commands )" autocomplete="off" />
+          <button class="send-btn" id="sendBtn" title="Ask Thinker" aria-label="Ask Thinker"><svg><use href="#i-send"/></svg></button>
+        </div>
+        <div class="cmd-menu" id="cmdMenu"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== overlays ===== -->
+<div class="overlay" id="paletteOverlay">
+  <div class="palette">
+    <input id="paletteInput" placeholder="Find a note, or name a new one" autocomplete="off" />
+    <div class="palette-results" id="paletteResults"></div>
+    <div class="palette-foot"><span>↵ open</span><span>"Folder / Name" files a new note</span><span>⌘⌫ delete</span></div>
+  </div>
+</div>
+
+<div class="overlay" id="modalOverlay">
+  <div class="modal-wrap">
+    <div class="modal" id="modalBox"></div>
+  </div>
+</div>
+
+<div class="overlay" id="drawerOverlay" style="align-items:stretch;justify-content:flex-end;padding:0">
+  <div class="drawer" id="drawer" style="position:relative;transform:none">
+    <div class="drawer-head"><svg class="ink-blot" style="width:14px;height:14px"><use href="#i-blot"/></svg><span class="title" id="drawerTitle">Follow the thought</span><button class="icon-btn" id="drawerClose"><svg><use href="#i-x"/></svg></button></div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-compose"><input id="drawerInput" placeholder="Push back, ask why, keep going…" autocomplete="off" /><button class="btn small" id="drawerSend">Send</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="ai.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
