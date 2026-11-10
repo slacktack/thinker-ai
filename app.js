@@ -148,7 +148,7 @@
     let at = 0, timer;
     const show = (k) => {
       at = Math.max(0, Math.min(n, k));
-      steps.forEach((s, i) => s.classList.toggle("on", i < at));
+      steps.forEach((s, i) => { s.classList.toggle("on", i < at); s.classList.toggle("cur", i === at - 1); });
       count.textContent = at + "/" + n;
       el.querySelector('[data-k="prev"]').disabled = at <= 1;
       el.querySelector('[data-k="next"]').disabled = at >= n;
@@ -650,6 +650,7 @@
     const theme = document.documentElement.dataset.theme;
     document.documentElement.dataset.theme = "light";
     document.querySelectorAll("#noteBody .sk-step").forEach((g) => g.classList.add("on"));
+    document.querySelectorAll("#noteBody svg").forEach((v) => { const st = v.querySelectorAll(".sk-step"); st.forEach((g, i) => g.classList.toggle("cur", i === st.length - 1)); });
     const t = document.title; document.title = active().title || "Note";
     addEventListener("afterprint", () => { document.documentElement.dataset.theme = theme; document.title = t; }, { once: true });
     setTimeout(() => window.print(), 60);

@@ -206,6 +206,8 @@
             out.say = "I won't hand you the full code, but let's build it together. What's the simplest version that works, even if it's slow? Write that first and I'll help you sharpen it.";
           }
           if (/\b(could you|can you|please) (share|paste|explain|clarify|give)|\bnot sure\b|\bnot familiar\b|don'?t know (that|this)/i.test(out.say)) { out.draw = false; out.sketch = "none"; return out; }
+          const tr = algoTrace(opts.message || "");
+          if (tr && !/complexit|big.?o/i.test(opts.message || "")) { out.draw = true; out.sketch = tr; return out; }
           // drawing priority: known topic from the question > formula > generic steps
           // only sketches that literally picture their topic; "flow"/"graph"/"timeline" are scene-specific
           const q = opts.message || tail(opts.noteText, 300);
@@ -257,6 +259,17 @@
       const r = +rhs.replace(/,/g, ""); if (Math.abs(v - r) < 1e-9 * Math.max(1, Math.abs(v))) return m;
       return lhs + " = " + (Number.isInteger(v) ? v : +v.toFixed(4));
     });
+  }
+  // Which algorithm to animate, plus any input the writer gave ([1,2,5], "abcabcbb", n = 6, target 9, amount 11).
+  function algoTrace(q) {
+    const k = /dijkstra|shortest path/i.test(q) ? "dijkstra" : /\bbfs\b|breadth.?first|level.?order/i.test(q) ? "bfs" : /\bdfs\b|depth.?first/i.test(q) ? "dfs"
+      : /sliding window|longest substring|without repeating/i.test(q) ? "window" : /two.?pointer|container with most water|pair.*(sum|target).*sorted|sorted.*pair/i.test(q) ? "twoptr"
+      : /parenthes|brackets/i.test(q) ? "parens" : /climb(ing)?.?stairs/i.test(q) ? "stairs" : /coin.?change|fewest coins|minimum (number of )?coins/i.test(q) ? "coins" : /merge.?sort/i.test(q) ? "merge" : null;
+    if (!k) return null;
+    const arr = (q.match(/\[([-\d,\s]+)\]/) || [])[1], str = (q.match(/["“']([^"”']{2,12})["”']/) || [])[1];
+    const num = (re) => { const m = q.match(re); return m ? +m[1] : undefined; };
+    const sp = { k, a: arr ? arr.split(",").map(Number).filter((x) => !isNaN(x)) : undefined, s: str, n: num(/\b(?:n|amount)\s*=?\s*(\d+)/i) ?? num(/(\d+)\s*(?:stairs|steps)/i), t: num(/target\s*=?\s*(-?\d+)/i) };
+    return "trace:" + encodeURIComponent(JSON.stringify(sp));
   }
   function clip(t, n) { return t.length <= n ? t : t.slice(0, n).replace(/\s+\S*$/, "") + "…"; }
   function tidy(say) {
@@ -611,6 +624,198 @@
       return '<g class="pop ' + cls + '"><circle class="queen-bg" cx="' + x + '" cy="' + y + '" r="13"/><text class="queen-tx" x="' + x + '" y="' + (y + 5) + '" text-anchor="middle">♛</text></g>';
     }
 
+    if (/^trace:/.test(key)) { let sp; try { sp = JSON.parse(decodeURIComponent(key.slice(6))); } catch (e) { sp = {}; } return traceSVG(sp); }
+    // Algorithm traces: the app runs the real algorithm on a small input, so every frame is correct.
+    // Base drawing is step 1; each frame is one more step. Elements marked fx show only on their own step.
+    function traceSVG(sp) {
+      const E = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const tx = (x, y, s, cls, anchor) => '<text class="label fade ' + (cls || "") + '" x="' + x + '" y="' + y + '"' + (anchor ? ' text-anchor="middle"' : "") + ">" + E(s) + "</text>";
+      const note = (x, y, s) => { const ws = String(s).split(" "), ls = []; let c = ""; ws.forEach((w) => { if ((c + " " + w).trim().length > 58 && c) { ls.push(c); c = w; } else c = (c + " " + w).trim(); }); if (c) ls.push(c); return ls.map((l, i) => tx(x, y + i * 17, l, "fx trace-note")).join(""); };
+      const fr = (k, inner) => '<g class="d' + (2 * k + 1) + '">' + inner + "</g>";
+      const title = (s) => tx(20, 20, s, "big");
+      if (sp.k === "dijkstra" || sp.k === "bfs" || sp.k === "dfs") return graphTrace(sp.k);
+      if (sp.k === "window" || sp.k === "twoptr" || sp.k === "parens") return arrayTrace(sp);
+      if (sp.k === "stairs" || sp.k === "coins") return dpTrace(sp);
+      if (sp.k === "merge") return mergeTrace(sp.a);
+      return wrap(title("Nothing to trace."), "0 0 400 40");
+
+      function graphTrace(kind) {
+        const pos = { A: [40, 125], B: [140, 58], C: [140, 192], D: [262, 58], E: [262, 192], F: [362, 125] }, N = Object.keys(pos);
+        const ed = [["A", "B", 4], ["A", "C", 2], ["C", "B", 1], ["B", "D", 5], ["C", "D", 8], ["C", "E", 10], ["D", "E", 2], ["D", "F", 6], ["E", "F", 3]];
+        const adj = {}; N.forEach((n) => (adj[n] = []));
+        ed.forEach(([u, v, w]) => { adj[u].push([v, w]); adj[v].push([u, w]); });
+        Object.values(adj).forEach((l) => l.sort((a, b) => a[0].localeCompare(b[0])));
+        const weighted = kind === "dijkstra";
+        const line = (u, v, cls) => { const [x1, y1] = pos[u], [x2, y2] = pos[v]; return '<path class="stroke draw ' + cls + '" ' + P + ' d="M' + x1 + " " + y1 + " L" + x2 + " " + y2 + '"/>'; };
+        let o = tx(20, 20, kind === "dijkstra" ? "Dijkstra from A: settle the closest unsettled node, then relax its edges." : kind === "bfs" ? "BFS from A: a queue visits the graph level by level." : "DFS from A: go as deep as you can, then backtrack.", "big");
+        ed.forEach(([u, v, w]) => { o += line(u, v, "d1"); if (weighted) { const [x1, y1] = pos[u], [x2, y2] = pos[v]; o += tx((x1 + x2) / 2 + 7, (y1 + y2) / 2 - 6, w, "small d1 wt"); } });
+        N.forEach((n) => { const [x, y] = pos[n]; o += '<circle class="node-c pop d1" cx="' + x + '" cy="' + y + '" r="15"/>' + tx(x, y + 5, n, "d1 node-l", 1); });
+        const rowsLab = kind === "dijkstra" ? ["dist", "prev"] : kind === "bfs" ? ["level", "from"] : ["order", "from"];
+        N.forEach((n, i) => { o += tx(84 + i * 52, 238, n, "d1 node-l", 1); });
+        o += tx(20, 260, rowsLab[0], "small d1") + tx(20, 280, rowsLab[1], "small d1") + '<path class="stroke draw d1" ' + P + ' d="M20 244 H380" style="opacity:.25"/>';
+        const F = [], snap = (o2) => F.push(Object.assign({}, o2, { r0: Object.assign({}, o2.r0), r1: Object.assign({}, o2.r1) }));
+        const r0 = {}, r1 = {}, done = new Set();
+        if (kind === "dijkstra") {
+          r0.A = 0; r1.A = "–";
+          const pq = () => "PQ: " + N.filter((n) => r0[n] != null && !done.has(n)).sort((a, b) => r0[a] - r0[b]).map((n) => "(" + r0[n] + "," + n + ")").join(" ");
+          snap({ r0, r1, pq: pq(), note: "Start: dist[A] = 0, every other node ∞. Put A in the priority queue." });
+          while (done.size < N.length) {
+            const u = N.filter((n) => r0[n] != null && !done.has(n)).sort((a, b) => r0[a] - r0[b])[0]; if (!u) break;
+            done.add(u);
+            snap({ r0, r1, u, settle: u, pq: pq(), note: "Pop " + u + " (smallest dist " + r0[u] + "). " + u + " is final: no shorter way can exist." });
+            adj[u].forEach(([v, w]) => {
+              if (done.has(v)) return;
+              const cand = r0[u] + w, cur = r0[v], better = cur == null || cand < cur;
+              if (better) { r0[v] = cand; r1[v] = u; }
+              snap({ r0, r1, u, edge: [u, v], ok: better, pq: pq(), note: "Check " + u + "→" + v + ": " + r0[u] + " + " + w + " = " + cand + (better ? (cur == null ? " < ∞" : " < " + cur) + " → update dist[" + v + "] = " + cand + ", prev = " + u : " ≥ " + cur + " → keep " + cur) });
+            });
+          }
+          const path = (n) => (r1[n] === "–" ? [n] : path(r1[n]).concat(n));
+          snap({ r0, r1, tree: true, pq: "PQ: empty", note: "Done. Read a path backwards with prev: F ← " + r1.F + " … so A→F is " + path("F").join("→") + " (" + r0.F + ")." });
+        } else if (kind === "bfs") {
+          const q = ["A"]; r0.A = 0; r1.A = "–"; done.add("A");
+          snap({ r0, r1, pq: "Queue: [A]", note: "Start: mark A seen at level 0 and enqueue it." });
+          while (q.length) {
+            const u = q.shift();
+            snap({ r0, r1, u, settle: u, pq: "Queue: [" + q.join(", ") + "]", note: "Dequeue " + u + " (level " + r0[u] + "). Look at each neighbor." });
+            adj[u].forEach(([v]) => {
+              const nw = !done.has(v);
+              if (nw) { done.add(v); r0[v] = r0[u] + 1; r1[v] = u; q.push(v); }
+              snap({ r0, r1, u, edge: [u, v], ok: nw, pq: "Queue: [" + q.join(", ") + "]", note: u + "→" + v + ": " + (nw ? "not seen → mark, level " + r0[v] + ", enqueue" : "already seen → skip") });
+            });
+          }
+          snap({ r0, r1, tree: true, pq: "Queue: empty", note: "Done. Levels are the fewest edges from A; prev links form the BFS tree." });
+        } else {
+          let c = 0; r1.A = "–";
+          const stack = [];
+          const go = (u) => {
+            done.add(u); r0[u] = ++c; stack.push(u);
+            snap({ r0, r1, u, settle: u, pq: "Stack: [" + stack.join(" → ") + "]", note: "Visit " + u + " (#" + c + "). Try its neighbors in order." });
+            adj[u].forEach(([v]) => {
+              if (done.has(v)) { snap({ r0, r1, u, edge: [u, v], ok: false, pq: "Stack: [" + stack.join(" → ") + "]", note: u + "→" + v + ": already visited → skip" }); return; }
+              r1[v] = u;
+              snap({ r0, r1, u, edge: [u, v], ok: true, pq: "Stack: [" + stack.join(" → ") + "]", note: u + "→" + v + ": unvisited → go deeper" });
+              go(v);
+            });
+            stack.pop();
+            snap({ r0, r1, u, pq: "Stack: [" + stack.join(" → ") + "]", note: u + " has no unvisited neighbors left → backtrack" + (stack.length ? " to " + stack[stack.length - 1] : ", done") });
+          };
+          go("A");
+          snap({ r0, r1, tree: true, pq: "Stack: empty", note: "Done. Order: " + N.slice().sort((a, b) => r0[a] - r0[b]).join(" → ") + "; prev links form the DFS tree." });
+        }
+        F.forEach((f, i) => {
+          let g = "";
+          if (f.settle) { const [x, y] = pos[f.settle]; g += '<circle class="visited pop" cx="' + x + '" cy="' + y + '" r="15"/>' + tx(x, y + 5, f.settle, "node-l", 1); }
+          if (f.u) { const [x, y] = pos[f.u]; g += '<circle class="ring pop fx" cx="' + x + '" cy="' + y + '" r="21"/>'; }
+          if (f.edge) g += line(f.edge[0], f.edge[1], (f.ok ? "return" : "trace") + " fx");
+          if (f.tree) N.forEach((n) => { if (f.r1[n] && f.r1[n] !== "–") g += line(f.r1[n], n, "return fx"); });
+          N.forEach((n, j) => { g += tx(84 + j * 52, 260, f.r0[n] == null ? "∞" : f.r0[n], "fx dist", 1) + tx(84 + j * 52, 280, f.r1[n] || "·", "fx small", 1); });
+          g += tx(20, 302, f.pq, "fx small") + note(20, 324, f.note);
+          o += fr(i + 1, g);
+        });
+        return wrap(o, "0 0 400 356");
+      }
+
+      function arrayTrace(sp) {
+        let cells, frames = [], head;
+        if (sp.k === "window") {
+          const s = String(sp.s || "abcabcbb").slice(0, 10); cells = s.split("");
+          head = 'Longest substring without repeats in "' + s + '"';
+          const last = {}; let l = 0, best = 0, bl = 0;
+          cells.forEach((c, r) => {
+            let moved = false;
+            if (last[c] != null && last[c] >= l) { l = last[c] + 1; moved = true; }
+            last[c] = r; if (r - l + 1 > best) { best = r - l + 1; bl = l; }
+            frames.push({ l, r, note: "R = " + r + " '" + c + "'" + (moved ? ": repeat, move L to " + l : ": new, grow") + ' · window "' + s.slice(l, r + 1) + '" · best ' + best });
+          });
+          frames.push({ l: bl, r: bl + best - 1, note: 'Answer: "' + s.slice(bl, bl + best) + '", length ' + best });
+        } else if (sp.k === "twoptr") {
+          const a = (sp.a && sp.a.length > 1 ? sp.a : [1, 3, 4, 6, 8, 11]).slice(0, 10).sort((x, y) => x - y), t = sp.t != null ? sp.t : 10;
+          cells = a.map(String); head = "Two pointers: find a pair that sums to " + t;
+          let l = 0, r = a.length - 1;
+          while (l < r && frames.length < 10) {
+            const sum = a[l] + a[r];
+            frames.push({ l, r, note: a[l] + " + " + a[r] + " = " + sum + (sum === t ? " ✓ found it" : sum < t ? " < " + t + ", move L right" : " > " + t + ", move R left") });
+            if (sum === t) break; if (sum < t) l++; else r--;
+          }
+          if (l >= r) frames.push({ note: "Pointers met: no pair sums to " + t });
+        } else {
+          const s = String(sp.s || "{[()]}").slice(0, 10); cells = s.split(""); head = 'Valid parentheses? "' + s + '"';
+          const st = [], pair = { ")": "(", "]": "[", "}": "{" }; let ok = true;
+          cells.forEach((c, i) => {
+            if (!ok) return;
+            if ("([{".includes(c)) { st.push(c); frames.push({ i, st: st.slice(), note: "'" + c + "' opens: push" }); }
+            else if (st[st.length - 1] === pair[c]) { st.pop(); frames.push({ i, st: st.slice(), note: "'" + c + "' matches the top: pop" }); }
+            else { ok = false; frames.push({ i, st: st.slice(), note: "'" + c + "' doesn't match: invalid" }); }
+          });
+          if (ok) frames.push({ st: st.slice(), note: st.length ? "Leftover opens on the stack: invalid" : "Stack empty: valid ✓" });
+        }
+        const n = cells.length, w = Math.min(40, Math.floor((sp.k === "parens" ? 280 : 360) / n)), x0 = 20, y0 = 50;
+        let o = tx(20, 20, head, "big");
+        cells.forEach((c, i) => { o += '<rect class="stroke fade d1" x="' + (x0 + i * w) + '" y="' + y0 + '" width="' + (w - 4) + '" height="34" rx="6"/>' + tx(x0 + i * w + (w - 4) / 2, y0 + 22, c, "d1 cell-tx", 1) + tx(x0 + i * w + (w - 4) / 2, y0 + 48, i, "small d1", 1); });
+        const ptr = (i, lab, dy) => tx(x0 + i * w + (w - 4) / 2, y0 + 64 + (dy || 0), "▲ " + lab, "fx ptr", 1);
+        frames.forEach((f, k) => {
+          let g = "";
+          if (f.l != null && f.r != null && sp.k === "window") g += '<rect class="win fade fx" x="' + (x0 + f.l * w - 3) + '" y="' + (y0 - 4) + '" width="' + ((f.r - f.l + 1) * w + 2) + '" height="42" rx="8"/>';
+          if (f.l != null && sp.k !== "parens") g += ptr(f.l, "L") + (f.r != null && f.r !== f.l ? ptr(f.r, "R") : "");
+          if (f.i != null) g += ptr(f.i, "i");
+          if (f.st) { f.st.forEach((c, j) => { g += '<rect class="stroke fade fx" x="330" y="' + (178 - j * 26) + '" width="44" height="24" rx="5"/>' + tx(352, 195 - j * 26, c, "fx cell-tx", 1); }); g += tx(352, 222, "stack", "small fx", 1); }
+          g += note(20, 150, f.note);
+          o += fr(k + 1, g);
+        });
+        return wrap(o, "0 0 400 " + (sp.k === "parens" ? 236 : 186));
+      }
+
+      function dpTrace(sp) {
+        const frames = []; let dp = [], head, n;
+        if (sp.k === "stairs") {
+          n = Math.max(2, Math.min(sp.n || 6, 10)); head = "Climbing " + n + " stairs: ways(i) = ways(i−1) + ways(i−2)";
+          dp = [1, 1]; frames.push({ fill: [0, 1], note: "Base: 1 way to stand at 0, 1 way to reach step 1" });
+          for (let i = 2; i <= n; i++) { dp[i] = dp[i - 1] + dp[i - 2]; frames.push({ fill: [i], from: [i - 1, i - 2], to: i, note: "dp[" + i + "] = dp[" + (i - 1) + "] + dp[" + (i - 2) + "] = " + dp[i - 1] + " + " + dp[i - 2] + " = " + dp[i] }); }
+          frames.push({ note: n + " stairs can be climbed in " + dp[n] + " ways" });
+        } else {
+          const coins = (sp.a && sp.a.length ? sp.a : [1, 2, 5]).filter((c) => c > 0).slice(0, 4); n = Math.max(1, Math.min(sp.n || 11, 11));
+          head = "Coin change, coins [" + coins.join(", ") + "], amount " + n + ": fewest coins";
+          dp = [0]; frames.push({ fill: [0], note: "Base: 0 coins make amount 0" });
+          for (let i = 1; i <= n; i++) {
+            let best = Infinity, bc = null;
+            coins.forEach((c) => { if (c <= i && dp[i - c] + 1 < best) { best = dp[i - c] + 1; bc = c; } });
+            dp[i] = best;
+            frames.push({ fill: [i], from: bc ? [i - bc] : [], to: i, note: "dp[" + i + "] = " + (bc ? "dp[" + (i - bc) + "] + 1 (use coin " + bc + ") = " + best : "∞, no coin fits") });
+          }
+          frames.push({ note: dp[n] === Infinity ? "Amount " + n + " can't be made" : "Amount " + n + " needs " + dp[n] + " coins" });
+        }
+        const w = Math.min(34, Math.floor(360 / (n + 1))), x0 = 20, y0 = 74, cx = (i) => x0 + i * w + (w - 4) / 2;
+        let o = tx(20, 20, head, "big");
+        for (let i = 0; i <= n; i++) o += '<rect class="stroke fade d1" x="' + (x0 + i * w) + '" y="' + y0 + '" width="' + (w - 4) + '" height="32" rx="5"/>' + tx(cx(i), y0 + 48, i, "small d1", 1);
+        frames.forEach((f, k) => {
+          let g = "";
+          (f.fill || []).forEach((i) => { g += tx(cx(i), y0 + 21, dp[i] === Infinity ? "∞" : dp[i], "cell-tx", 1); });
+          (f.from || []).forEach((s) => { g += '<path class="stroke return draw fx" ' + P + ' d="M' + cx(s) + " " + (y0 - 2) + " C " + cx(s) + " " + (y0 - 34) + ", " + cx(f.to) + " " + (y0 - 34) + ", " + cx(f.to) + " " + (y0 - 4) + '"/>'; });
+          g += note(20, 150, f.note);
+          o += fr(k + 1, g);
+        });
+        return wrap(o, "0 0 400 180");
+      }
+
+      function mergeTrace(a0) {
+        const a = (a0 && a0.length > 1 ? a0 : [38, 27, 43, 3, 9, 82, 10]).slice(0, 8);
+        const rows = [], split = (arr) => arr.length < 2 ? [arr] : [arr.slice(0, Math.ceil(arr.length / 2)), arr.slice(Math.ceil(arr.length / 2))];
+        let lvl = [a]; rows.push({ segs: lvl, lab: "start" });
+        while (lvl.some((s) => s.length > 1)) { lvl = lvl.flatMap(split); rows.push({ segs: lvl, lab: "split" }); }
+        const levels = rows.map((r) => r.segs);
+        for (let d = levels.length - 2; d >= 0; d--) rows.push({ segs: levels[d].map((s) => s.slice().sort((x, y) => x - y)), lab: "merge" });
+        const w = Math.min(30, Math.floor(300 / a.length)), gap = 10;
+        let o = tx(20, 20, "Merge sort: split to singles, merge back in order", "big"), y = 40;
+        rows.forEach((r, k) => {
+          let x = 64, g = tx(20, y + 18, r.lab, "small fade");
+          r.segs.forEach((s) => { s.forEach((v, i) => { g += '<rect class="stroke fade" x="' + (x + i * w) + '" y="' + y + '" width="' + (w - 2) + '" height="26" rx="4"/>' + tx(x + i * w + (w - 2) / 2, y + 17, v, "cell-tx small-cell", 1); }); x += s.length * w + gap; });
+          o += k === 0 ? g.replace(/class="([^"]*fade)/g, 'class="$1 d1') : fr(k, g);
+          y += 32;
+        });
+        return wrap(o, "0 0 400 " + (y + 6));
+      }
+    }
     if (/^equation:/.test(key)) return eqSVG(key.slice(9));
     if (/^work:/.test(key)) {
       let ws; try { ws = JSON.parse(decodeURIComponent(key.slice(5))); } catch (e) { ws = []; }

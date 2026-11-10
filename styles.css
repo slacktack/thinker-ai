@@ -1065,3 +1065,21 @@ body { background-color: var(--paper); background-image: radial-gradient(color-m
 .margin-card.replying { box-shadow: -3px 0 0 var(--ink-pen); padding-left: 10px; }
 .margin-card { cursor: pointer; }
 .status-line .secs { display: none; }
+
+/* algorithm traces */
+.sketch g.sk-step:not(.cur) .fx { visibility: hidden; }
+.sketch .node-c { fill: var(--paper); stroke: var(--ink-pen); stroke-width: 1.5; }
+.sketch .visited { fill: color-mix(in srgb, var(--ink-pen) 22%, var(--paper)); stroke: var(--ink-pen); stroke-width: 1.5; }
+.sketch .node-l { font-family: var(--sans); font-size: 13px; font-weight: 600; fill: var(--ink); }
+.sketch .ring { fill: none; stroke: var(--ink-pen); stroke-width: 2; stroke-dasharray: 3 3; }
+.sketch .wt { fill: var(--muted); font-size: 11px; }
+.sketch .dist { font-family: var(--sans); font-size: 11.5px; font-weight: 600; fill: var(--ink-pen); }
+.sketch .win { fill: color-mix(in srgb, var(--ink-pen) 10%, transparent); stroke: var(--ink-pen); stroke-width: 1.3; stroke-dasharray: 4 3; }
+.sketch .cell-tx { font-family: var(--mono, monospace); font-size: 14px; fill: var(--ink); }
+.sketch .small-cell { font-size: 11px; }
+.sketch .ptr { font-family: var(--sans); font-size: 11px; font-weight: 600; fill: var(--ink-pen); }
+.sketch .trace-note { font-family: var(--serif); font-size: 13.5px; fill: var(--ink-soft); }
+.sketch .fx.return { stroke: var(--ink-pen); stroke-width: 3.4; opacity: .9; }
+.sketch .fx.trace { stroke-width: 2.2; stroke-dasharray: 5 4; opacity: .7; }
+.sketch .wt { font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--paper); stroke-width: 4px; stroke-linejoin: round; }
+.note-body .inline-sketch { max-width: 560px; }
