@@ -9,7 +9,7 @@
   "use strict";
 
   const BASE = "https://ail.buyhatke.com/lfm";
-  const UA = { "User-Agent": "Mozilla/5.0 (ThinkerNotebook)" };
+  const UA = {}; // never set User-Agent: Safari sends it, and the server's CORS rejects it
   const SKETCH_KEYS = ["flow", "incline", "recursion", "twosum", "timeline", "graph", "nqueens", "linkedlist", "binarysearch", "bigo", "none"];
 
   const state = { mode: "local", health: null, lastCheck: 0 };
@@ -17,7 +17,7 @@
   /* ---------- low-level LFM3 client ---------- */
   async function health(force) {
     const now = Date.now();
-    if (!force && state.health && now - state.lastCheck < 30000) return state.health;
+    if (!force && state.mode === "live" && state.health && now - state.lastCheck < 30000) return state.health;
     try {
       const r = await fetch(BASE + "/health", { headers: UA, signal: timeout(6000) });
       const j = await r.json();
@@ -271,7 +271,8 @@
         }
       } catch (e) { /* fall through to local mind */ }
     }
-    return localMind(opts);
+    // never invent an answer when the server can't be reached
+    return { say: state.mode === "live" ? "I lost the connection mid-answer. Send it again?" : "I can't reach my brain right now (no connection to the server). Check your internet and send it again.", draw: false, sketch: "none", title: "", source: "offline" };
   }
 
   // Recompute "a op b = c" so a small model's arithmetic slip never reaches a student.
