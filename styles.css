@@ -1083,3 +1083,6 @@ body { background-color: var(--paper); background-image: radial-gradient(color-m
 .sketch .fx.trace { stroke-width: 2.2; stroke-dasharray: 5 4; opacity: .7; }
 .sketch .wt { font-size: 12px; font-weight: 600; paint-order: stroke; stroke: var(--paper); stroke-width: 4px; stroke-linejoin: round; }
 .note-body .inline-sketch { max-width: 560px; }
+.sketch .lesson-card { stroke-width: 1; opacity: .5; fill: none; }
+.margin-you .you-cmd { font-family: var(--mono, monospace); font-weight: 500; font-size: .85em; color: var(--ink-pen); }
+.margin-card .body > span:first-child, .draft-text { white-space: pre-line; }

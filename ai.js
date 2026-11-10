@@ -115,16 +115,34 @@
     "- say is your final answer only: no thinking out loud, no 'Wait', no self-corrections.",
     "- For coding problems give only the next hint (the idea or what to track) and a question; never the full recurrence, solution or code.",
     "- Never write their notes, full solutions or complete code. If they ask for full code, say you'll guide them instead and give the first step as a hint.",
-    "- Plain text only: no LaTeX, no $ signs, no markdown. Write math like F = G m1 m2 / r^2.",
+    "- Plain text only: no LaTeX, no $ signs, no markdown. Write math in plain text, using ^ for powers.",
     "- If the answer has a key formula, put it in formula and explain each symbol in terms.",
     "- If the idea is a process or algorithm, put 3 to 6 steps in steps, each 6 words max, in order.",
-    "- Numbers and calculations go in work (one calculation per line, like 2^10 = 1024 outcomes), never in say. When there are numbers, say stays short reasoning, max 30 words.",
+    "- Numbers and calculations go in work (one calculation per line, with its result), never in say. When there are numbers, say stays short reasoning, max 30 words.",
     "- draw=true when a picture helps them see it; pick the closest sketch, else none.",
     'Output JSON only: {"say": string, "title": "2-5 word note title for this topic", "formula": string or null, "terms": [[symbol, meaning]], "steps": [string], "work": [string], "draw": boolean, "sketch": "' + SKETCH_KEYS.join("|") + '"}',
   ].join("\n");
 
   // The thinking call only gets the facts right: tiny schema, so its reasoning stays short.
   const SYSTEM_FACTS = SYSTEM.split("\n").filter((l) => !/formula|steps|work|draw=|Output JSON|title/.test(l)).concat('Output JSON only: {"say": string}').join("\n");
+
+  // What each slash command means, in words the model can follow.
+  const TASK_HINT = {
+    explain: "Explain it clearly and completely; the study sheet on the page carries the details, so say gives the big picture.",
+    draw: "Make it visual: fill steps, work or formula so it can be drawn.",
+    quiz: "Quiz them: ask exactly 3 short numbered questions about this topic, easiest first. Do not give the answers.",
+    vent: "Just listen: reflect what they seem to feel in one or two sentences, no advice, then one gentle question.",
+    challenge: "Poke holes: name the weakest assumption in what they wrote and ask one sharp question about it.",
+    plan: "Help them plan: 3 to 5 concrete next steps in steps, then ask which one they'll start with.",
+  };
+  const SYSTEM_LESSON = [
+    "You write a compact study sheet that answers the QUESTION for a student.",
+    "One section per item the question asks about (each law, type, pillar, equation or concept), max 5, in the usual textbook order. Never add topics that were not asked.",
+    "Each section: title (short), idea (one plain sentence), formula (or null), example (one concrete everyday or numeric example), derive (2 to 4 short steps showing why it holds or how the formula follows).",
+    "Use only standard textbook facts. Plain text only: no LaTeX, no $ signs, no markdown. Write math in plain text, using ^ for powers.",
+    'Output JSON only: {"sections": [{"title": string, "idea": string, "formula": string or null, "example": string, "derive": [string]}]}',
+  ].join("\n");
+  const WANTS_LESSON = /\b(all|each|every|list|compare|comparison|differences?|types of|kinds of|laws|pillars|principles|derive|derivation|prove|with examples?|and examples?|in detail|step by step|full explanation)\b|\b\d+\s+(laws|pillars|types|principles|rules|stages|steps|phases|kinds)\b/i;
 
   // Stable prefix first (note, thread) so the server's prompt cache reuses it; the changing ask goes last.
   // a hand-drawn sketch only when the question names its exact subject
@@ -138,6 +156,7 @@
       noteText ? "NOTE:\n" + tail(noteText, NOTE_CHARS) : "NOTE: (empty)",
       hist ? "THREAD:\n" + hist : "",
       [persona && persona !== "Thinker" ? "Persona: " + persona + "." : "", intent ? "Intent: " + intent + "." : "", "Task: " + (task || "margin") + "."].filter(Boolean).join(" "),
+      TASK_HINT[intent && task === "chat" ? intent : task] ? "TASK: " + TASK_HINT[intent && task === "chat" ? intent : task] : "",
       message ? "QUESTION (answer this, not anything older): " + message : "The writer paused on the last lines of the note. Speak only if something deserves a second look.",
     ].filter(Boolean).join("\n\n");
     if (message) ctx = "QUESTION: " + message + "\n\n" + ctx;
@@ -175,7 +194,13 @@
   function tail(s, n) { s = String(s || ""); return s.length > n ? "…" + s.slice(-n) : s; }
   function truncate(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
 
+  const SMALL_TALK = /^\s*(hi+|hey+|hello+|yo|sup|hola|namaste|thanks?|thank you|ty|ok(ay)?|cool|nice|great|hmm+|bye|good (morning|night|evening))\b[\s!.?,]*$/i;
   async function respond(opts, onDraft) {
+    if (SMALL_TALK.test(opts.message || "")) {
+      const say = /thank|ty\b/i.test(opts.message) ? "Anytime. What do you want to dig into next?" : /bye|night/i.test(opts.message) ? "See you. Your notes are saved here." : "Hi! Write what you're studying in the note, or ask me anything here.";
+      if (onDraft) onDraft(say);
+      return { say, draw: false, sketch: "none", title: "", source: "local" };
+    }
     if (!opts.message && latestLine(opts.noteText)) opts = Object.assign({}, opts, { message: latestLine(opts.noteText) });
     await health();
     if (state.mode === "live") {
@@ -192,7 +217,8 @@
         let settled = false, drafted = false;
         const draft = (p) => { if (ok(p) && !settled && !drafted) { drafted = true; onDraft(normalize(p).say); } };
         if (onDraft) { quickP.then(draft); fastP.then(draft); }
-        const [fast, slow] = await Promise.all([fastP, thinkP]);
+        const lessonP = opts.task === "explain" || (opts.task !== "quiz" && opts.task !== "vent" && WANTS_LESSON.test(opts.message || "")) ? chat({ messages: buildMessages(opts, SYSTEM_LESSON), thinking: false, max_tokens: 1400, temperature: 0.2, response_format: { type: "json_object" }, signal: timeout(45000) }).then((r) => safeJSON(r.content)).catch(() => null) : Promise.resolve(null);
+        const [fast, slow, lesson] = await Promise.all([fastP, thinkP, lessonP]);
         settled = true;
         let parsed = ok(fast) ? fast : slow;
         if (parsed && ok(slow)) parsed = Object.assign({}, parsed, { say: slow.say });
@@ -205,7 +231,12 @@
           if (/#include|\bdef \w+\(|\bint main\b|\bfunction \w+\(|(;\s*\n.*){3}/.test(out.say)) {
             out.say = "I won't hand you the full code, but let's build it together. What's the simplest version that works, even if it's slow? Write that first and I'll help you sharpen it.";
           }
+          if (opts.task === "vent" || opts.task === "quiz") { out.draw = false; out.sketch = "none"; return out; }
           if (/\b(could you|can you|please) (share|paste|explain|clarify|give)|\bnot sure\b|\bnot familiar\b|don'?t know (that|this)/i.test(out.say)) { out.draw = false; out.sketch = "none"; return out; }
+          const secs = lesson && Array.isArray(lesson.sections) ? lesson.sections.filter((x) => x && x.title).slice(0, 5).map((x) => ({
+            t: clip(String(x.title), 60), i: String(x.idea || "").replace(/\$+/g, ""), f: x.formula ? String(x.formula).replace(/\$+/g, "") : "",
+            e: fixArithmetic(String(x.example || "").replace(/\$+/g, "")), d: (Array.isArray(x.derive) ? x.derive : []).slice(0, 4).map((y) => fixArithmetic(String(y).replace(/\$+/g, ""))) })) : [];
+          if (secs.length >= 2) { out.draw = true; out.sketch = "lesson:" + encodeURIComponent(JSON.stringify(secs)); return out; }
           const tr = algoTrace(opts.message || "");
           if (tr && !/complexit|big.?o/i.test(opts.message || "")) { out.draw = true; out.sketch = tr; return out; }
           // drawing priority: known topic from the question > formula > generic steps
@@ -232,8 +263,10 @@
             out.draw = true; out.sketch = "formula:" + encodeURIComponent(JSON.stringify({ f: f.slice(0, 90), t: terms }));
             return out;
           }
+          const f0 = typeof parsed.sketch === "string" && SKETCH_KEYS.includes(parsed.sketch) && parsed.sketch !== "none" ? parsed.sketch : "";
           if (steps.length >= 3) { out.draw = true; out.sketch = "steps:" + encodeURIComponent(JSON.stringify(steps)); return out; }
-          if (opts.message && out.draw) { out.draw = false; out.sketch = "none"; }
+          if (opts.task === "draw" && f0) { out.draw = true; out.sketch = f0; return out; }
+          if (opts.message && out.draw && opts.task !== "draw") { out.draw = false; out.sketch = "none"; }
           return out;
         }
       } catch (e) { /* fall through to local mind */ }
@@ -245,7 +278,7 @@
   function choose(n, k) { if (k < 0 || k > n || n > 170) return NaN; let r = 1; for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i; return Math.round(r); }
   function calc(raw) {
     const expr = String(raw).replace(/\bC\(\s*(\d+)\s*,\s*(\d+)\s*\)|\b(\d+)\s*C\s*(\d+)\b/g, (m, a, b, c, d) => String(choose(+(a || c), +(b || d))));
-    const e = expr.replace(/[×x·](?=\s*[\d(])/g, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/,(?=\d{3})/g, "");
+    const e = expr.replace(/½/g, "0.5").replace(/[×x·](?=\s*[\d(])/g, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/,(?=\d{3})/g, "");
     if (/^\s*\d+\s*$/.test(e) && /C\(|\dC\d/.test(raw)) return +e;
     if (!/^[\d\s.+\-*/()]+$/.test(e) || !/[+\-*/]/.test(e)) return null;
     try { const v = Function('"use strict";return (' + e + ")")(); return Number.isFinite(v) ? v : null; } catch (err) { return null; }
@@ -254,7 +287,7 @@
     // "total = 2^10" or "C(10,5)" with no result: append the value
     line = line.replace(/(=\s*)((?:C\(\s*\d+\s*,\s*\d+\s*\)|\d+(?:\.\d+)?(?:\s*[+\-*/^×÷]\s*\d+(?:\.\d+)?)+))(?!\s*=)(?=\s*(?:[a-zA-Z.,;]|$))/g, (m, eq, ex) => { const v = calc(ex); return v == null ? m : eq + ex + " = " + (Number.isInteger(v) ? v : +v.toFixed(4)); });
     line = line.replace(/(:\s*|is\s+)(C\(\s*\d+\s*,\s*\d+\s*\))(?!\s*=)/g, (m, pre, ex) => { const v = calc(ex); return v == null ? m : pre + ex + " = " + v; });
-    return line.replace(/((?:\d[\d.,]*|\(|C\()[\d.,\s+\-*/^×x·÷()C]*[\d)])\s*=\s*(-?\d[\d.,]*)/g, (m, lhs, rhs) => {
+    return line.replace(/((?:\d[\d.,]*|\(|C\(|½)[\d.,\s+\-*/^×x·÷()C½]*[\d)])\s*=\s*(-?\d[\d.,]*)/g, (m, lhs, rhs) => {
       const v = calc(lhs); if (v == null) return m;
       const r = +rhs.replace(/,/g, ""); if (Math.abs(v - r) < 1e-9 * Math.max(1, Math.abs(v))) return m;
       return lhs + " = " + (Number.isInteger(v) ? v : +v.toFixed(4));
@@ -281,7 +314,7 @@
     }
     const sents = say.split(/(?<=[.!?])\s+(?=[A-Z(])/);
     let out = "";
-    for (const x of sents) { if ((out + " " + x).split(/\s+/).length > 70 && out) break; out = (out + " " + x).trim(); }
+    for (const x of sents) { if ((out + " " + x).split(/\s+/).length > 90 && out) break; out = (out + " " + x).trim(); }
     return out;
   }
 
@@ -295,6 +328,7 @@
   function normalize(p) {
     let sketch = SKETCH_KEYS.includes(p.sketch) ? p.sketch : "none";
     const draw = !!p.draw && sketch !== "none";
+    p.say = String(p.say).replace(/\\n/g, "\n");
     return { title: typeof p.title === "string" ? p.title.replace(/["$]/g, "").trim().slice(0, 48) : "", say: tidy(String(p.say).replace(/\$+/g, "").replace(/\\\(|\\\)/g, "").trim()), draw, sketch: draw ? sketch : "none", source: "live" };
   }
 
@@ -817,6 +851,28 @@
       }
     }
     if (/^equation:/.test(key)) return eqSVG(key.slice(9));
+    if (/^lesson:/.test(key)) {
+      let ss; try { ss = JSON.parse(decodeURIComponent(key.slice(7))); } catch (e) { ss = []; }
+      const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const wrapL = (t, n) => { const out = []; let cur = ""; String(t).split(/\s+/).forEach((w) => { if ((cur + " " + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }); if (cur) out.push(cur); return out; };
+      let o = "", y = 8;
+      ss.forEach((sec, i) => {
+        const k = 2 * i + 1, top = y; let g = "";
+        y += 26; g += '<text class="label big fade d' + k + '" x="34" y="' + y + '">' + e(sec.t) + "</text>";
+        g += '<text class="label small fade d' + k + '" x="16" y="' + y + '">' + (i + 1) + "</text>";
+        wrapL(sec.i, 54).forEach((l) => { y += 20; g += '<text class="label fade d' + k + '" x="34" y="' + y + '">' + e(l) + "</text>"; });
+        if (sec.f) { y += 30; g += '<text class="label formula fade d' + k + '" x="34" y="' + y + '">' + e(sec.f) + "</text>"; y += 8; g += underline(34, y, Math.min(330, sec.f.length * 11 + 10), "d" + k); }
+        if (sec.e) { y += 26; g += '<text class="label small fade d' + k + '" x="34" y="' + y + '">EXAMPLE</text>'; wrapL(sec.e, 54).forEach((l) => { y += 19; g += '<text class="label fade d' + k + '" x="34" y="' + y + '">' + e(l) + "</text>"; }); }
+        if (sec.d && sec.d.length) {
+          y += 26; g += '<text class="label small fade d' + k + '" x="34" y="' + y + '">WHY</text>';
+          sec.d.forEach((st, j) => { wrapL(st, 50).forEach((l, m) => { y += 19; g += '<text class="label fade d' + k + '" x="' + (m ? 52 : 34) + '" y="' + y + '">' + (m ? "" : (j + 1) + ". ") + e(l) + "</text>"; }); });
+        }
+        y += 18;
+        o += '<g class="d' + k + '"><rect class="stroke lesson-card draw d' + k + '" ' + P + ' x="6" y="' + top + '" width="388" height="' + (y - top) + '" rx="12"/>' + g + "</g>";
+        y += 14;
+      });
+      return wrap(o, "0 0 400 " + y);
+    }
     if (/^work:/.test(key)) {
       let ws; try { ws = JSON.parse(decodeURIComponent(key.slice(5))); } catch (e) { ws = []; }
       const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

@@ -274,7 +274,7 @@
         $("noteBody").appendChild(p); n.body = serializeBody(); save();
       }
       const you = document.createElement("div"); you.className = "margin-you enter";
-      you.innerHTML = '<span class="you-label">You</span>' + (opts.image ? '<img class="you-img" alt="Your image" src="' + opts.image + '">' : "") + "<span>" + esc(long ? opts.message.slice(0, 110).trim() + "…" : opts.message) + "</span>" + (long ? '<span class="you-note">Added to your note</span>' : "");
+      you.innerHTML = '<span class="you-label">You</span>' + (opts.image ? '<img class="you-img" alt="Your image" src="' + opts.image + '">' : "") + "<span>" + (opts.cmd ? '<b class="you-cmd">' + esc(opts.cmd) + "</b> · " : "") + esc(long ? opts.message.slice(0, 110).trim() + "…" : opts.message) + "</span>" + (long ? '<span class="you-note">Added to your note</span>' : "");
       col.appendChild(you);
     }
 
@@ -291,7 +291,7 @@
       catch (e) { toast("Couldn't read the image. Answering from your words."); }
     }
     try {
-      res = await AI.respond({ noteText: plainText(n.body), message, persona: personaName(n.persona), intent: n.intent, task: opts.task || "margin", history: hist }, (draft) => {
+      res = await AI.respond({ noteText: plainText(n.body), message, persona: personaName(n.persona), intent: opts.intent || (opts.task === "chat" ? "" : n.intent), task: opts.task || "margin", history: hist }, (draft) => {
         // show the quick take now; the thought-through answer replaces it
         const st = card.querySelector(".status-line"); if (!st) return;
         let d = card.querySelector(".draft-text"); if (!d) { d = document.createElement("span"); d.className = "draft-text"; st.before(d); }
@@ -299,7 +299,7 @@
       });
     } catch (e) { res = AI.localMind({ noteText: plainText(n.body), message, intent: n.intent, task: opts.task, history: hist }); }
 
-    if ((!n.title || n.title === "Untitled") && (res.title || message)) {
+    if ((!n.title || n.title === "Untitled") && (res.title || (message && res.source === "live"))) {
       n.title = res.title || message.split(/\s+/).slice(0, 6).join(" ").replace(/[?.!,:;-]+$/, "");
       $("noteTitle").textContent = n.title; renderSidebar();
     }
@@ -451,7 +451,10 @@
     $("composerInput").value = "";
     const n = active();
     if (c.intent) { n.intent = c.intent; }
-    think({ task: c.task, message: c.cmd === "/draw" ? "draw this" : "" });
+    // the command acts on the latest thing written (or the note's title)
+    const lines = plainText(n.body).split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const topic = lines[lines.length - 1] || n.title || "this note";
+    think({ task: c.task, message: topic, cmd: c.cmd, intent: c.intent });
   }
   /* ---------------- images: paste, drop or pick → vision ---------------- */
   let pendingImg = null;
