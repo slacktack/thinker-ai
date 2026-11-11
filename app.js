@@ -908,9 +908,12 @@
       if (n.mode === "with") {
         bodyT = setTimeout(() => {
           const txt = plainText(n.body);
-          if (txt.length > 20 && txt !== lastBody && Date.now() > cooldown && !responding) {
+          // a line ending in "?" is a question however short ("1.18x960 ?"); answer it like one
+          const lines = txt.split(/\n+/).map((x) => x.trim()).filter(Boolean), last = lines[lines.length - 1] || "";
+          if (/\?$/.test(last) && last.length >= 2 && txt !== lastBody && !responding) { lastBody = txt; cooldown = Date.now() + 6000; think({ task: "chat", message: last.replace(/\s*\?$/, "?") }); }
+          else if (txt.length > 20 && txt !== lastBody && Date.now() > cooldown && !responding) {
             const added = txt.length - lastBody.length;
-            if (added > 12 || /[?.!]$/.test(txt.trim())) { lastBody = txt; cooldown = Date.now() + 6000; think({ task: "margin" }); }
+            if (added > 12 || /[.!]$/.test(txt.trim())) { lastBody = txt; cooldown = Date.now() + 6000; think({ task: "margin" }); }
           }
         }, 1500);
       }

@@ -227,21 +227,36 @@
   function tail(s, n) { s = String(s || ""); return s.length > n ? "…" + s.slice(-n) : s; }
   function truncate(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
 
+  // plain arithmetic is computed here, exactly; the model slips on sums
+  function pureMath(msg) {
+    const m = String(msg || "").trim().replace(/^(what\s*is|what's|whats|calculate|compute|find|solve)\s+/i, "").replace(/[=?\s]+$/, "");
+    if (!/^[\d.\s+\-*/x×÷^()%]+$/i.test(m) || !/\d\s*[+\-*/x×÷^%]\s*[\d(]/i.test(m)) return null;
+    const expr = m.replace(/[x×]/gi, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/(\d)\s*%/g, "($1/100)");
+    let v; try { v = Function('"use strict"; return (' + expr + ")")(); } catch (e) { return null; }
+    if (typeof v !== "number" || !isFinite(v)) return null;
+    return { pretty: m.replace(/\s*[x×*]\s*/gi, " × ").replace(/\s*\/\s*/g, " ÷ ").replace(/\s*([+\-])\s*/g, " $1 ").replace(/\s+/g, " ").trim(), value: String(Math.round(v * 1e10) / 1e10) };
+  }
   const SMALL_TALK = /^\s*(hi+|hey+|hello+|yo|sup|hola|namaste|thanks?|thank you|ty|ok(ay)?|cool|nice|great|hmm+|bye|good (morning|night|evening))\b[\s!.?,]*$/i;
   // any picture the notebook can't draw itself (world map, heart, cartoon) comes from Wikimedia Commons
   const PIC_RE = /\b(draw\w*|sketch\w*|show me|picture|image|photo|diagram|map|cartoon|illustrat\w*|labell?ed|look like|looks like|dikhao|dikha|banao|banake|chitra|naksha)\b/i;
-  const PIC_FILLER = /\b(please|can you|could you|will you|draw\w*|sketch\w*|show|me|us|a|an|the|of|picture|image|photo|illustration|what does|what do|look|looks|like|for|i want|give|make|dikhao|dikha|banao|banake|karo|ka|ki|ke|ek|mujhe|chahiye|chitra)\b|[?!.,]/gi;
+  const PIC_FILLER = /\b(please|can you|could you|will you|draw\w*|sketch\w*|show|me|us|a|an|the|of|picture|image|photo|illustration|what does|what do|look|looks|like|for|i want|give|make|dikhao|dikha|banao|banake|karo|ka|ki|ke|ek|mujhe|chahiye|chitra|with|its|their|and)\b|[?!.,]/gi;
   const LANG = /[-_ (](ar|fa|az|fr|sl|uk|de|es|it|ru|zh|ja|pt|nl|pl|tr|hi|bn|ta|ur|he|ko|vi|id|ca|sv|fi|cs|hu|ro|el|bg|sr|hr|th|ms|eu|gl|lt|lv|et|sk|mk|hy|ka|be|kk|sq|bs|cy|ga)[-_ ).]/i;
-  function picQuery(msg) { return String(msg || "").replace(/^\/\w+\s*/, "").replace(/\bnaksha\b/gi, "map").replace(PIC_FILLER, " ").replace(/\s+/g, " ").trim().slice(0, 80); }
+  function picQuery(msg) { return String(msg || "").replace(/^\/\w+\s*/, "").replace(/\bnaksha\b/gi, "map").replace(/\bunited state\b/gi, "united states").replace(/\b(usa|u\.s\.a?\.?)(?=\s|$)/gi, "united states").replace(/\bus(?=\s+(map|rivers?|states?|flag|presidents?|history|political))/gi, "united states").replace(/\buk\b/gi, "united kingdom").replace(PIC_FILLER, " ").replace(/\s+/g, " ").trim().slice(0, 80); }
   function pickPicture(pages, q) {
-    const words = q.toLowerCase().split(" ").filter((w) => w.length > 2), old = /\b(old|ancient|histor\w*|medieval|empire|1[0-8]\d\d)\b/i.test(q);
+    const GENERIC = /^(diagram|labelled|labeled|structure|picture|cartoon|drawing|svg|png|jpg|the|and|with|of|en)$/;
+    const words = q.toLowerCase().split(" ").filter((w) => w.length > 2 && !GENERIC.test(w)), old = /\b(old|ancient|histor\w*|medieval|empire|1[0-8]\d\d)\b/i.test(q);
     const score = (p) => {
       const t = p.title.toLowerCase(), info = p.imageinfo && p.imageinfo[0]; if (!info || !info.thumburl) return -99;
       let sc = words.filter((w) => t.includes(w)).length * 3;
+      if (words.some((w) => new RegExp("\\bno " + w).test(t))) sc -= 8;
+      sc -= Math.min(3, t.replace(/\.\w+$/, "").split(/[^a-z]+/).filter((w) => w.length > 2 && !GENERIC.test(w) && !words.some((q) => w.startsWith(q) || q.startsWith(w))).length * 0.5);
       if (/svg|png/.test(info.mime)) sc += 2; if (/gif|tiff|pdf|djvu/.test(info.mime)) sc -= 6;
       if (/[-_ (]en[-_ ).]/i.test(t)) sc += 2; else if (LANG.test(t)) sc -= 6;
       if (!old && /\b1[0-8]\d\d\b/.test(t)) sc -= 5;
-      if (/logo|signature|flag|heraldry|coat of arms|telegraph|newspaper|political|seal of|county/.test(t)) sc -= 8;
+      if (/logo|signature|flag|heraldry|coat of arms|telegraph|newspaper|seal of|county/.test(t)) sc -= 8;
+      if (/united states/.test(q) && /\b(us|usa|u\.s\.|united states|conus)\b/.test(t)) sc += 6;
+      if (t.length > 70 || /\(ia |internet archive|\bpage \d|\bscan\b|\b\d{6,}\b/.test(t)) sc -= 5;
+      if (/\bmap\b/.test(q)) { if (/political|physical|blank|location|rivers|outline/.test(t)) sc += 2; for (const th of ["language", "religion", "population", "gdp", "density", "election", "distribution", "army", "expedition"]) if (t.includes(th) && !q.includes(th)) sc -= 4; }
       return sc;
     };
     return pages.map((p) => [score(p), p]).sort((a, b) => b[0] - a[0] || a[1].index - b[1].index)[0];
@@ -251,10 +266,14 @@
     // "draw a dog" wants an illustration, not a photo; diagrams and maps can be either
     const art = /\b(draw\w*|sketch\w*|cartoon|banake|banao)\b/i.test(msg) && !/\b(diagram|map|naksha|labell?ed|structure|anatomy)\b/i.test(msg);
     const sq = art ? (/cartoon/i.test(q) ? q : q + " cartoon") + " filetype:drawing" : q + " filetype:bitmap|drawing";
-    const u = "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=20&gsrsearch=" + encodeURIComponent(sq) + "&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=900";
-    try {
+    const look = async (sq) => {
+      const u = "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=20&gsrsearch=" + encodeURIComponent(sq) + "&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=900";
       const j = await (await fetch(u, { signal: timeout(8000) })).json();
-      const best = pickPicture(Object.values((j.query || {}).pages || {}), q); if (!best || best[0] < 3) return null;
+      const b = pickPicture(Object.values((j.query || {}).pages || {}), q); return b && b[0] >= 3 ? b : null;
+    };
+    try {
+      // no good cartoon? fall back to any image of it
+      const best = (await look(sq)) || (art ? await look(q + " filetype:bitmap|drawing") : null); if (!best) return null;
       const p = best[1], info = p.imageinfo[0], meta = info.extmetadata || {}, strip = (h) => String((h && h.value) || "").replace(/<[^>]*>/g, "").trim();
       return { src: info.thumburl, page: info.descriptionurl, title: p.title.replace(/^File:/, "").replace(/\.\w+$/, "").replace(/[_-]+/g, " "), credit: [strip(meta.Artist).slice(0, 60), strip(meta.LicenseShortName)].filter(Boolean).join(" · ") };
     } catch (e) { return null; }
@@ -282,6 +301,8 @@
       return { say, draw: false, sketch: "none", title: "", source: "local" };
     }
     if (!opts.message && latestLine(opts.noteText)) opts = Object.assign({}, opts, { message: latestLine(opts.noteText) });
+    const sum = pureMath(opts.message);
+    if (sum) return { say: sum.pretty + " = *" + sum.value + "*", draw: true, sketch: "work:" + encodeURIComponent(JSON.stringify([sum.pretty + " = " + sum.value])), title: "Calculating " + sum.pretty, source: "local" };
     await health();
     // the small model misreads Hinglish ("the" = "were") and writes it garbled; translate, answer in English
     if (state.mode === "live" && HINGLISH.test(opts.message || "")) {
@@ -762,7 +783,8 @@
     cities: { Delhi:[28.6,77.2], Mumbai:[19.08,72.88], Kolkata:[22.57,88.36], Chennai:[13.08,80.27], Bengaluru:[12.97,77.59], Hyderabad:[17.39,78.49], Ahmedabad:[23.02,72.57], Jaipur:[26.91,75.79], Lucknow:[26.85,80.95], Patna:[25.6,85.1], Bhopal:[23.26,77.41], Thiruvananthapuram:[8.52,76.94], Bhubaneswar:[20.3,85.82], Guwahati:[26.14,91.74], Srinagar:[34.08,74.8], Shimla:[31.1,77.17], Chandigarh:[30.73,76.78], Dehradun:[30.32,78.03], Raipur:[21.25,81.63], Ranchi:[23.34,85.31], Gandhinagar:[23.22,72.65], Panaji:[15.49,73.83], Amaravati:[16.51,80.52], Itanagar:[27.08,93.6], Shillong:[25.58,91.89], Imphal:[24.82,93.94], Kohima:[25.67,94.11], Aizawl:[23.73,92.72], Agartala:[23.83,91.29], Gangtok:[27.33,88.61], Varanasi:[25.32,83.0], Prayagraj:[25.43,81.85], Mathura:[27.49,77.67], Pandharpur:[17.68,75.33], Puri:[19.81,85.83], Ayodhya:[26.8,82.2], Madurai:[9.93,78.12], Amritsar:[31.63,74.87], Leh:[34.15,77.58], Kanyakumari:[8.08,77.55], Pune:[18.52,73.86], Nagpur:[21.15,79.09], Agra:[27.18,78.01], Surat:[21.17,72.83], Kochi:[9.93,76.27], Mysuru:[12.3,76.64], Kanpur:[26.45,80.33], Indore:[22.72,75.86], Udaipur:[24.58,73.71], Jodhpur:[26.24,73.02] },
     states: { "Jammu and Kashmir":[33.8,75.0], Ladakh:[34.5,77.5], "Himachal Pradesh":[31.9,77.2], Punjab:[30.9,75.4], Haryana:[29.1,76.1], Uttarakhand:[30.1,79.0], Rajasthan:[26.6,73.8], "Uttar Pradesh":[27.0,80.9], Bihar:[25.8,85.6], Sikkim:[27.5,88.5], "Arunachal Pradesh":[28.0,94.5], Assam:[26.3,92.8], Nagaland:[26.1,94.5], Manipur:[24.8,93.9], Mizoram:[23.4,92.8], Tripura:[23.8,91.6], Meghalaya:[25.5,91.3], "West Bengal":[23.8,87.9], Jharkhand:[23.6,85.3], Odisha:[20.5,84.4], Chhattisgarh:[21.3,81.9], "Madhya Pradesh":[23.5,78.3], Gujarat:[22.7,71.6], Maharashtra:[19.4,76.1], Telangana:[17.9,79.0], "Andhra Pradesh":[15.9,79.7], Karnataka:[15.0,75.7], Goa:[15.4,74.0], Kerala:[10.4,76.4], "Tamil Nadu":[11.0,78.4] },
   };
-  const MAP_RE = /\b(map|mapping)\b.*\b(india|indian|states?|rivers?|mountains?|ranges?|cities)\b|\b(india|indian)\b.*\bmap\b|\bon (a|the) map\b/i;
+  // the built-in map is India only; any other map is a real picture
+  const MAP_RE = /\b(india|indian|bharat)\b[^.?!]*\b(map|naksha)\b|\b(map|naksha)\b[^.?!]*\b(india|indian|bharat)\b/i;
   const SYSTEM_MAP = [
     "You help a UPSC student with a rough hand-drawn map of India.",
     "say: 2 to 4 sentences explaining what the map shows and why it matters, key terms in *asterisks*.",
@@ -1416,7 +1438,7 @@
   }
 
   window.ThinkerAI = {
-    health, chat, see, tts, stt, respond, localMind, sketchSVG, revealWords, inkHTML,
+    health, chat, see, tts, stt, respond, localMind, sketchSVG, revealWords, inkHTML, findPicture,
     get mode() { return state.mode; },
     SKETCH_KEYS,
   };
