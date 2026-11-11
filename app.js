@@ -280,7 +280,7 @@
 
     const card = document.createElement("div"); card.className = "margin-card enter";
     card.style.setProperty("--ink-pen", inkVar(n.ink));
-    card.innerHTML = '<span class="ink-dot is-fresh"></span><div class="body"><span class="status-line"><svg class="quill"><use href="#i-quill"/></svg><span class="dots">' + (opts.task === "draw" ? "Sketching it" : opts.task === "margin" ? "Reading along" : "Thinking") + "</span></span></div>";
+    card.innerHTML = '<span class="ink-dot is-fresh"></span><div class="body"><span class="status-line"><svg class="quill"><use href="#i-quill"/></svg><span class="dots">' + (opts.deep ? "Thinking deeper" : opts.task === "draw" ? "Sketching it" : opts.task === "margin" ? "Reading along" : "Thinking") + "</span></span></div>";
     const t0 = Date.now(), tick = setInterval(() => { const st = card.querySelector(".status-line"); if (!st) return clearInterval(tick); let el = st.querySelector(".secs"); if (!el) { el = document.createElement("span"); el.className = "secs"; st.appendChild(el); } el.textContent = "thinking it through · " + Math.round((Date.now() - t0) / 1000) + "s"; }, 1000);
     col.appendChild(card);
 
@@ -291,11 +291,13 @@
       catch (e) { toast("Couldn't read the image. Answering from your words."); }
     }
     try {
-      res = await AI.respond({ noteText: plainText(n.body), message, persona: personaName(n.persona), intent: opts.intent || (opts.task === "chat" ? "" : n.intent), task: opts.task || "margin", history: hist }, (draft) => {
+      res = await AI.respond({ noteText: plainText(n.body), message, persona: personaName(n.persona), intent: opts.intent || (opts.task === "chat" ? "" : n.intent), task: opts.task || "margin", history: hist, deep: opts.deep }, (draft, useNow) => {
         // show the quick take now; the thought-through answer replaces it
         const st = card.querySelector(".status-line"); if (!st) return;
         let d = card.querySelector(".draft-text"); if (!d) { d = document.createElement("span"); d.className = "draft-text"; st.before(d); }
         d.textContent = draft; st.querySelector(".dots").textContent = "Double-checking";
+        const b = document.createElement("button"); b.className = "follow-chip use-draft"; b.textContent = "Use this answer";
+        b.onclick = (ev) => { ev.stopPropagation(); useNow(); }; st.after(b);
       });
     } catch (e) { res = AI.localMind({ noteText: plainText(n.body), message, intent: n.intent, task: opts.task, history: hist }); }
 
@@ -318,6 +320,12 @@
     chip.innerHTML = 'Follow the thought <svg><use href="#i-arrow"/></svg>';
     chip.onclick = (ev) => { ev.stopPropagation(); replyTo(r.id); };
     body.appendChild(chip);
+    const q = opts.message || message;
+    if (q && !opts.deep) {
+      const deeper = document.createElement("button"); deeper.className = "follow-chip"; deeper.textContent = "Think deeper";
+      deeper.onclick = (ev) => { ev.stopPropagation(); deeper.remove(); think({ task: opts.task === "margin" ? "chat" : opts.task, intent: opts.intent, message: q, cmd: "think deeper", deep: true }); };
+      body.appendChild(deeper);
+    }
     card.appendChild(dot); card.appendChild(body); card._rid = r.id;
     card.onclick = () => replyTo(r.id);
     await AI.revealWords(text, r.text).done;
@@ -446,14 +454,15 @@
     menu.classList.add("open");
     menu._items = items;
   }
-  function runCommand(c) {
+  function runCommand(c, arg) {
     $("cmdMenu").classList.remove("open");
-    $("composerInput").value = "";
     const n = active();
-    if (c.intent) { n.intent = c.intent; }
-    // the command acts on the latest thing written (or the note's title)
+    // the command acts on what was typed after it, else the latest line, else a real title
     const lines = plainText(n.body).split(/\n+/).map((x) => x.trim()).filter(Boolean);
-    const topic = lines[lines.length - 1] || n.title || "this note";
+    const topic = (arg || "").trim() || lines[lines.length - 1] || (n.title && !/^untitled/i.test(n.title) ? n.title : "");
+    if (!topic) { $("composerInput").value = c.cmd + " "; $("composerInput").focus(); toast("Add a topic after " + c.cmd + ", e.g. " + c.cmd + " photosynthesis"); return; }
+    $("composerInput").value = "";
+    if (c.intent) { n.intent = c.intent; }
     think({ task: c.task, message: topic, cmd: c.cmd, intent: c.intent });
   }
   /* ---------------- images: paste, drop or pick → vision ---------------- */
@@ -483,7 +492,7 @@
     if (!v) return;
     if (v.startsWith("/")) {
       const c = COMMANDS.find((x) => x.cmd === v.split(" ")[0]);
-      if (c) { runCommand(c); return; }
+      if (c) { runCommand(c, v.slice(c.cmd.length)); return; }
     }
     inp.value = ""; $("cmdMenu").classList.remove("open");
     think({ task: "chat", message: v });
@@ -539,7 +548,6 @@
     const n = { id: uid(), title, folder, brief: "", mode: "with", persona: "thinker", ink: "ink", intent: "challenge", body: "", responses: [], updatedAt: Date.now() };
     db.notes.unshift(n); save(); go("app"); openNote(n.id); renderSidebar();
     setTimeout(() => $("noteBody").focus(), 100);
-    toast("New note ready.");
   }
 
   /* ---------------- modals ---------------- */

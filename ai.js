@@ -203,6 +203,12 @@
     }
     if (!opts.message && latestLine(opts.noteText)) opts = Object.assign({}, opts, { message: latestLine(opts.noteText) });
     await health();
+    if (state.mode === "live" && opts.task === "quiz") {
+      // the JSON prompt drops the questions on the small model; ask plainly
+      const r = await chat({ messages: [{ role: "system", content: "Write exactly 3 short numbered quiz questions about the topic, easiest first. One per line. No answers, no intro." }, { role: "user", content: "Topic: " + clip(opts.message || tail(opts.noteText, 400), 300) }], thinking: false, max_tokens: 200, temperature: 0.4, signal: timeout(20000) }).catch(() => null);
+      const qs = String((r && r.content) || "").split("\n").map((x) => x.replace(/^\s*\d+[.)]\s*/, "").trim()).filter((x) => x.length > 3).slice(0, 3);
+      if (qs.length) return { say: "Quick quiz:\n" + qs.map((x, i) => i + 1 + ". " + x).join("\n"), draw: false, sketch: "none", title: clip(opts.message || "", 40).replace(/^./, (c) => c.toUpperCase()) + " Quiz", source: "live" };
+    }
     if (state.mode === "live") {
       try {
         // thinking needs room (~1k reasoning tokens); if it fails, retry fast before any offline fallback
@@ -210,18 +216,25 @@
         const ok = (p) => p && typeof p.say === "string" && p.say.trim();
         const fastP = chat({ messages: buildMessages(opts), thinking: false, max_tokens: 500, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(30000) })
           .then((r) => safeJSON(r.content)).catch(() => null);
-        const thinkP = chat({ messages: buildMessages(opts, SYSTEM_FACTS), thinking: true, max_tokens: 2500, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(45000) })
+        // fast by default; the slow reasoning pass only runs when the user asks to think deeper
+        const deep = !!opts.deep;
+        const thinkP = !deep ? Promise.resolve(null) : chat({ messages: buildMessages(opts, SYSTEM_FACTS), thinking: true, max_tokens: 2500, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(45000) })
           .then((r) => safeJSON(r.content)).catch(() => null);
         // quickest possible first answer: same facts prompt, no thinking, tiny output
-        const quickP = onDraft ? chat({ messages: buildMessages(opts, SYSTEM_FACTS), thinking: false, max_tokens: 160, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(20000) }).then((r) => safeJSON(r.content)).catch(() => null) : null;
-        let settled = false, drafted = false;
-        const draft = (p) => { if (ok(p) && !settled && !drafted) { drafted = true; onDraft(normalize(p).say); } };
-        if (onDraft) { quickP.then(draft); fastP.then(draft); }
+        const quickP = onDraft && deep ? chat({ messages: buildMessages(opts, SYSTEM_FACTS), thinking: false, max_tokens: 160, temperature: 0.3, response_format: { type: "json_object" }, signal: timeout(20000) }).then((r) => safeJSON(r.content)).catch(() => null) : null;
+        let settled = false, drafted = false, useNow;
+        const skipP = new Promise((r) => (useNow = r));
+        // second arg lets the user take the draft instead of waiting on the slow check
+        const draft = (p) => { if (ok(p) && !settled && !drafted) { drafted = true; onDraft(normalize(p).say, () => useNow([p, null, null])); } };
+        if (onDraft && deep) { quickP.then(draft); fastP.then(draft); }
         const lessonP = opts.task === "explain" || (opts.task !== "quiz" && opts.task !== "vent" && WANTS_LESSON.test(opts.message || "")) ? chat({ messages: buildMessages(opts, SYSTEM_LESSON), thinking: false, max_tokens: 1400, temperature: 0.2, response_format: { type: "json_object" }, signal: timeout(45000) }).then((r) => safeJSON(r.content)).catch(() => null) : Promise.resolve(null);
-        const [fast, slow, lesson] = await Promise.all([fastP, thinkP, lessonP]);
+        // once the fast answer is in, give the lesson sheet at most 5s more
+        const capped = (p) => Promise.race([p, fastP.then((f) => (ok(f) ? new Promise((r) => setTimeout(() => r(null), 5000)) : p))]);
+        const [fast, slow, lesson] = await Promise.race([Promise.all([fastP, thinkP, capped(lessonP)]), skipP]);
         settled = true;
         let parsed = ok(fast) ? fast : slow;
-        if (parsed && ok(slow)) parsed = Object.assign({}, parsed, { say: slow.say });
+        // a deep answer much shorter than the fast one is usually a bare intro line; keep the fast one
+        if (parsed && ok(slow) && !(ok(fast) && slow.say.length < fast.say.length / 2)) parsed = Object.assign({}, parsed, { say: slow.say });
         const recent = (opts.history || []).slice(-6).map((m) => m.text).reverse().join("\n");
         const eq = findEquation(opts.message) || (/solve|how|draw|show|graph|plot|root|factor/i.test(opts.message || "") || opts.task === "draw" || opts.task === "explain" ? findEquation(recent) || findEquation(tail(opts.noteText, 600)) : null);
         if (eq && parsed && typeof parsed.say === "string" && parsed.say.trim()) { const o = normalize(parsed); o.draw = true; o.sketch = "equation:" + eq; return o; }
