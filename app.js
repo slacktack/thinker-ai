@@ -10,6 +10,7 @@
   const AI = window.ThinkerAI;
   const LS = "thinker.v1";
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const clip1 = (t, k) => { t = String(t || "").replace(/\s+/g, " ").trim(); return t.length > k ? t.slice(0, k - 1) + "…" : t; };
   const isPhone = () => matchMedia("(max-width: 760px)").matches;
 
   /* ---------------- state ---------------- */
@@ -277,7 +278,7 @@
         $("noteBody").appendChild(p); n.body = serializeBody(); save();
       }
       const you = document.createElement("div"); you.className = "margin-you enter";
-      you.innerHTML = '<span class="you-label">You</span>' + (opts.image ? '<img class="you-img" alt="Your image" src="' + opts.image + '">' : "") + "<span>" + (opts.cmd ? '<b class="you-cmd">' + esc(opts.cmd) + "</b> · " : "") + esc(long ? opts.message.slice(0, 110).trim() + "…" : opts.message) + "</span>" + (long ? '<span class="you-note">Added to your note</span>' : "");
+      you.innerHTML = '<span class="you-label">You · Q' + (n.responses.length + 1) + "</span>" + (opts.image ? '<img class="you-img" alt="Your image" src="' + opts.image + '">' : "") + "<span>" + (opts.cmd ? '<b class="you-cmd">' + esc(opts.cmd) + "</b> · " : "") + esc(long ? opts.message.slice(0, 110).trim() + "…" : opts.message) + "</span>" + (long ? '<span class="you-note">Added to your note</span>' : "");
       col.appendChild(you);
     }
 
@@ -337,16 +338,44 @@
     card.onclick = () => replyTo(r.id);
     await AI.revealWords(text, r.text).done;
 
+    // each answer's drawings and proofs sit under a numbered marker matching "You · Qn" in the margin
+    let marked = false, markEl = null;
+    const mark = () => {
+      if (marked || !opts.message) return; marked = true;
+      const m = document.createElement("div"); m.className = "q-mark"; m.setAttribute("contenteditable", "false");
+      m.innerHTML = '<span class="q-num">Q' + n.responses.length + '</span><span class="q-text">' + esc(clip1(opts.cmd ? opts.cmd + " " + opts.message : opts.message, 110)) + "</span>";
+      $("noteBody").appendChild(m); markEl = m;
+    };
     // code answers read like a lesson: explanation, then the picture, then the code
     if (res.code && res.explain) {
+      mark();
       const ex = document.createElement("div"); ex.className = "code-explain";
       ex.innerHTML = res.explain.split(/\n\s*\n/).map((p) => "<p>" + AI.inkHTML(p.trim()).replace(/\n/g, "<br>") + "</p>").join("");
       $("noteBody").appendChild(ex);
     }
     const lastSk = [...$("noteBody").querySelectorAll("[data-sketch]")].pop();
     let placed = null;
-    if (res.draw && res.sketch && res.sketch !== "none" && !(lastSk && lastSk.dataset.sketch === res.sketch)) { await wait(250); placed = insertSketch(res.sketch); }
+    if (res.draw && res.sketch && res.sketch !== "none" && !(lastSk && lastSk.dataset.sketch === res.sketch)) { await wait(250); mark(); placed = insertSketch(res.sketch); }
+    if (res.proof) {
+      mark();
+      const pf = document.createElement("div"); pf.className = "proof"; pf.setAttribute("contenteditable", "false");
+      pf.innerHTML = (res.proof.claim ? '<div class="proof-claim"><span class="proof-tag">Claim</span>' + AI.inkHTML(res.proof.claim) + "</div>" : "") +
+        '<ol class="proof-steps">' + res.proof.steps.map((x, i) => '<li style="--i:' + i + '">' + AI.inkHTML(x) + "</li>").join("") + "</ol>" +
+        (res.proof.conc ? '<div class="proof-conc"><span class="proof-tag">Therefore</span>' + AI.inkHTML(res.proof.conc) + ' <span class="qed">∎</span></div>' : "");
+      $("noteBody").appendChild(pf); n.body = serializeBody();
+      placed = placed || pf;
+    }
+    if (res.picture) {
+      mark();
+      const pc = res.picture, fig = document.createElement("figure"); fig.className = "pic"; fig.setAttribute("contenteditable", "false");
+      const img = document.createElement("img"); img.src = pc.src; img.alt = pc.title; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+      const cap = document.createElement("figcaption"); const a = document.createElement("a"); a.href = pc.page; a.target = "_blank"; a.rel = "noopener"; a.textContent = pc.title; cap.appendChild(a);
+      if (pc.credit) cap.appendChild(document.createTextNode(" · " + pc.credit + " · Wikimedia Commons"));
+      fig.appendChild(img); fig.appendChild(cap); $("noteBody").appendChild(fig); n.body = serializeBody();
+      placed = placed || fig;
+    }
     if (res.code) {
+      mark();
       const pre = document.createElement("pre"); pre.className = "code-block"; pre.setAttribute("contenteditable", "false");
       if (res.code.lang) pre.dataset.lang = res.code.lang;
       const code = document.createElement("code"); code.textContent = res.code.src; pre.appendChild(code);
@@ -355,7 +384,7 @@
     }
     if (placed && isPhone()) {
       const go = document.createElement("button"); go.className = "follow-chip"; go.textContent = (res.code ? "See the code" : "See the drawing") + " ↑";
-      go.onclick = (ev) => { ev.stopPropagation(); placed.scrollIntoView({ behavior: "smooth", block: "start" }); };
+      go.onclick = (ev) => { ev.stopPropagation(); (markEl || placed).scrollIntoView({ behavior: "smooth", block: "start" }); };
       body.insertBefore(go, chip);
       // the insert above pushed the answer down; put it back in view
       (([...col.querySelectorAll(".margin-you")].pop()) || card).scrollIntoView({ block: "start" });
@@ -368,8 +397,8 @@
       body.insertBefore(st, chip);
       const key = await res.later; st.remove();
       if (key && active() === n) {
-        const sk = insertSketch(key); save();
-        if (isPhone()) { const go = document.createElement("button"); go.className = "follow-chip"; go.textContent = "See the drawing ↑"; go.onclick = (ev) => { ev.stopPropagation(); sk.scrollIntoView({ behavior: "smooth", block: "start" }); }; body.insertBefore(go, chip); }
+        mark(); const sk = insertSketch(key); save();
+        if (isPhone()) { const go = document.createElement("button"); go.className = "follow-chip"; go.textContent = "See the drawing ↑"; go.onclick = (ev) => { ev.stopPropagation(); (markEl || sk).scrollIntoView({ behavior: "smooth", block: "start" }); }; body.insertBefore(go, chip); }
       }
     }
   }

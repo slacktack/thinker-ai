@@ -109,6 +109,7 @@
     "- Answer the QUESTION. Older notes and thread are background only; never answer an older question again.",
     "- Explain properly in 2 to 4 sentences (40 to 90 words): the core fact, why it is true or how it happens, and one concrete example. Then one short question to check they got it.",
     "- Use only well-established facts. Never invent numbers, names or formulas.",
+    "- If they ask to draw or show something, never say you cannot: the notebook shows a picture. Point out the key features to notice in it.",
     "- For good-or-bad questions about a person, event or policy, never give a one-word verdict: name the main contributions, the main criticisms, then ask what they weigh more.",
     "- If they name a problem you don't know by name (e.g. a LeetCode title), don't guess: say you don't know that exact problem and ask them to paste the statement.",
     "- If you are not sure what they mean, ask one short clarifying question instead of guessing.",
@@ -158,12 +159,26 @@
   // Stable prefix first (note, thread) so the server's prompt cache reuses it; the changing ask goes last.
   // a hand-drawn sketch only when the question names its exact subject
   const EXACT = { twosum: /two\s?sum/i, linkedlist: /linked\s?list/i, binarysearch: /binary\s?search/i, recursion: /recursi|fibonacci|fib\(/i, nqueens: /n.?queens/i, incline: /inclin|slope|ramp/i, bigo: /big.?o\b|time complexity|space complexity/i };
-  const HINGLISH = /\b(kya|hai|hota|hoti|kaise|kyun|kyu|samjhao|samjha|batao|bata|mujhe|nahi|karna|karte|matlab|aur|yeh|ye|ache|acha|achha|accha|bure|bura|tha|thi|kaun|kab|kahan|kaisa|kaisi)\b/i;
+  const HINGLISH = /\b(kya|hai|hota|hoti|kaise|kyun|kyu|samjhao|samjha|batao|bata|mujhe|nahi|karna|karte|matlab|aur|yeh|ye|ache|acha|achha|accha|bure|bura|tha|thi|kaun|kab|kahan|kaisa|kaisi|dikhao|dikha|banao|banake|karo|chahiye|naksha|chitra)\b/i;
   const SYSTEM_HINGLISH = [
     "Translate the Hinglish (Hindi in Latin script) question into plain English. Output only the English question, one line.",
-    "Glossary: acha/accha/ache = good, bura/bure = bad, tha/thi/the at the end = was/were, ya = or, kya = what, kyun/kyu = why, kaise = how, kab = when, kaun = who, kahan = where, samjhao/batao = explain/tell me, samajh nahi aata = I don't understand, nahi = not, mujhe = me/I, hota hai = is, kiya = did, aaye = came, ne = (marks who did it).",
+    "Glossary: acha/accha/ache = good, bura/bure = bad, tha/thi/the at the end = was/were, ya = or, kya = what, kyun/kyu = why, kaise = how, kab = when, kaun = who, kahan = where, samjhao/batao = explain/tell me, samajh nahi aata = I don't understand, banake dikhao/banao = draw/make and show, dikhao = show, naksha = map, chitra = picture, nahi = not, mujhe = me/I, hota hai = is, kiya = did, aaye = came, ne = (marks who did it).",
     "Examples:", "Akbar ache the ya bure? → Was Akbar good or bad?", "mujhe graphs samajh nahi aata → I don't understand graphs, explain them.", "mughal kab aaye the? → When did the Mughals come?",
   ].join("\n");
+  const PROVE_RE = /\b(prove|proof|show that|derive|derivation)\b/i;
+  const SYSTEM_PROOF = [
+    "You are a maths tutor. Write a clear, rigorous proof a student can follow. If the statement is false, prove its negation and say so in CLAIM.",
+    "Line 1: TITLE: 2-5 word title.", "Line 2: CLAIM: the statement being proved.", "Line 3: SUMMARY: one sentence with the key idea of the proof.",
+    "Then numbered steps, one per line, each a short sentence with its reason (1. Suppose ...). Plain text math only: sqrt(2), a^2, p/q, no LaTeX.",
+    "End with a line starting THEREFORE: and the conclusion. No other text.",
+  ].join("\n");
+  // proofs come back with LaTeX now and then; make it readable plain math
+  function deTeX(t) {
+    return t.replace(/\\[()[\]]/g, "").replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)").replace(/\(([\w²]+)\)\/\(([\w²]+)\)/g, "$1/$2").replace(/\\sqrt\{([^{}]+)\}/g, "√$1").replace(/sqrt\(([^()]+)\)/g, "√$1")
+      .replace(/\\mathbb\{Z\}/g, "ℤ").replace(/\\mathbb\{Q\}/g, "ℚ").replace(/\\mathbb\{R\}/g, "ℝ").replace(/\\mathbb\{N\}/g, "ℕ").replace(/\\neq/g, "≠").replace(/\\in\b/g, "∈").replace(/\\notin/g, "∉")
+      .replace(/\\cdot|\\times/g, "×").replace(/\\leq?/g, "≤").replace(/\\geq?/g, "≥").replace(/\\Rightarrow|\\implies/g, "⇒").replace(/\\gcd/g, "gcd").replace(/\\text\{([^{}]+)\}/g, "$1").replace(/\\,|\;|\\!/g, " ")
+      .replace(/\^2\b/g, "²").replace(/\^3\b/g, "³").replace(/\$/g, "").replace(/[ \t]{2,}/g, " ");
+  }
   const NOTE_CHARS = 64000, HIST_TURNS = 8;
   function latestLine(t) { const ls = String(t || "").split(/\n+/).map((x) => x.trim()).filter(Boolean); return (ls[ls.length - 1] || "").slice(-400); }
   function buildMessages({ noteText, message, persona, intent, task, history, hinglish }, system) {
@@ -213,7 +228,54 @@
   function truncate(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
 
   const SMALL_TALK = /^\s*(hi+|hey+|hello+|yo|sup|hola|namaste|thanks?|thank you|ty|ok(ay)?|cool|nice|great|hmm+|bye|good (morning|night|evening))\b[\s!.?,]*$/i;
+  // any picture the notebook can't draw itself (world map, heart, cartoon) comes from Wikimedia Commons
+  const PIC_RE = /\b(draw\w*|sketch\w*|show me|picture|image|photo|diagram|map|cartoon|illustrat\w*|labell?ed|look like|looks like|dikhao|dikha|banao|banake|chitra|naksha)\b/i;
+  const PIC_FILLER = /\b(please|can you|could you|will you|draw\w*|sketch\w*|show|me|us|a|an|the|of|picture|image|photo|illustration|what does|what do|look|looks|like|for|i want|give|make|dikhao|dikha|banao|banake|karo|ka|ki|ke|ek|mujhe|chahiye|chitra)\b|[?!.,]/gi;
+  const LANG = /[-_ (](ar|fa|az|fr|sl|uk|de|es|it|ru|zh|ja|pt|nl|pl|tr|hi|bn|ta|ur|he|ko|vi|id|ca|sv|fi|cs|hu|ro|el|bg|sr|hr|th|ms|eu|gl|lt|lv|et|sk|mk|hy|ka|be|kk|sq|bs|cy|ga)[-_ ).]/i;
+  function picQuery(msg) { return String(msg || "").replace(/^\/\w+\s*/, "").replace(/\bnaksha\b/gi, "map").replace(PIC_FILLER, " ").replace(/\s+/g, " ").trim().slice(0, 80); }
+  function pickPicture(pages, q) {
+    const words = q.toLowerCase().split(" ").filter((w) => w.length > 2), old = /\b(old|ancient|histor\w*|medieval|empire|1[0-8]\d\d)\b/i.test(q);
+    const score = (p) => {
+      const t = p.title.toLowerCase(), info = p.imageinfo && p.imageinfo[0]; if (!info || !info.thumburl) return -99;
+      let sc = words.filter((w) => t.includes(w)).length * 3;
+      if (/svg|png/.test(info.mime)) sc += 2; if (/gif|tiff|pdf|djvu/.test(info.mime)) sc -= 6;
+      if (/[-_ (]en[-_ ).]/i.test(t)) sc += 2; else if (LANG.test(t)) sc -= 6;
+      if (!old && /\b1[0-8]\d\d\b/.test(t)) sc -= 5;
+      if (/logo|signature|flag|heraldry|coat of arms|telegraph|newspaper|political|seal of|county/.test(t)) sc -= 8;
+      return sc;
+    };
+    return pages.map((p) => [score(p), p]).sort((a, b) => b[0] - a[0] || a[1].index - b[1].index)[0];
+  }
+  async function findPicture(msg) {
+    const q = picQuery(msg); if (q.length < 3) return null;
+    // "draw a dog" wants an illustration, not a photo; diagrams and maps can be either
+    const art = /\b(draw\w*|sketch\w*|cartoon|banake|banao)\b/i.test(msg) && !/\b(diagram|map|naksha|labell?ed|structure|anatomy)\b/i.test(msg);
+    const sq = art ? (/cartoon/i.test(q) ? q : q + " cartoon") + " filetype:drawing" : q + " filetype:bitmap|drawing";
+    const u = "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=20&gsrsearch=" + encodeURIComponent(sq) + "&prop=imageinfo&iiprop=url|mime|extmetadata&iiurlwidth=900";
+    try {
+      const j = await (await fetch(u, { signal: timeout(8000) })).json();
+      const best = pickPicture(Object.values((j.query || {}).pages || {}), q); if (!best || best[0] < 3) return null;
+      const p = best[1], info = p.imageinfo[0], meta = info.extmetadata || {}, strip = (h) => String((h && h.value) || "").replace(/<[^>]*>/g, "").trim();
+      return { src: info.thumburl, page: info.descriptionurl, title: p.title.replace(/^File:/, "").replace(/\.\w+$/, "").replace(/[_-]+/g, " "), credit: [strip(meta.Artist).slice(0, 60), strip(meta.LicenseShortName)].filter(Boolean).join(" · ") };
+    } catch (e) { return null; }
+  }
   async function respond(opts, onDraft) {
+    const picP = PIC_RE.test(opts.message || "") || opts.task === "draw" ? findPicture(opts.message) : null;
+    const out = await respondCore(opts, onDraft);
+    // keep the notebook's own drawings (traces, maps, timelines); a picture beats generic boxes
+    const bareMap = /^map:/.test(out.sketch || "") && (() => { try { const m = JSON.parse(decodeURIComponent(out.sketch.slice(4))); return !m.pts.length && !m.layers.length; } catch (e) { return false; } })();
+    const own = out.later || (out.draw && out.sketch && !bareMap && !/^(none|steps:|formula:|work:)/.test(out.sketch));
+    if (picP && !own && out.source !== "offline") {
+      const pic = await picP;
+      if (pic) {
+        out.picture = pic; out.draw = false; out.sketch = "none";
+        // the model insists it "can't create an image" even though one is now on the page
+        out.say = out.say.replace(/^[^.!?]*\b(can['’]?t|cannot|can not|unable to|not able to)\b[^.!?]*\b(image|picture|draw|drawing|generate|create|visual)\b[^.!?,;]*[.!?,;]?\s*(but\s+)?/i, "").replace(/^\s*I can (describe|point out|explain|tell you about|show you)\s+(that\s+)?/i, "").replace(/^./, (c) => c.toUpperCase()) || out.say;
+      }
+    }
+    return out;
+  }
+  async function respondCore(opts, onDraft) {
     if (SMALL_TALK.test(opts.message || "")) {
       const say = /thank|ty\b/i.test(opts.message) ? "Anytime. What do you want to dig into next?" : /bye|night/i.test(opts.message) ? "See you. Your notes are saved here." : "Hi! Write what you're studying in the note, or ask me anything here.";
       if (onDraft) onDraft(say);
@@ -245,6 +307,15 @@
       const out = normalize(Object.assign({ say: "Here's a rough map of India for this." }, p, { say: typeof p.say === "string" && p.say.trim() ? p.say : "Here's a rough map of India for this." }));
       out.draw = true; out.sketch = "map:" + encodeURIComponent(JSON.stringify(mapSpec(opts.message, p)));
       return out;
+    }
+    if (state.mode === "live" && PROVE_RE.test(opts.message || "") && !WANTS_CODE.test(opts.message || "") && opts.task !== "quiz" && opts.task !== "vent") {
+      const r = await chat({ messages: [{ role: "system", content: SYSTEM_PROOF }, { role: "user", content: "QUESTION: " + clip(opts.message, 600) + (opts.noteText ? "\n\nNOTE (context):\n" + tail(opts.noteText, 1500) : "") }], thinking: !!opts.deep, max_tokens: opts.deep ? 3000 : 900, temperature: 0.2, signal: timeout(opts.deep ? 90000 : 45000) }).catch(() => null);
+      const txt = deTeX(String((r && r.content) || "")), tag = (k) => { const x = txt.match(new RegExp("^[\\s*#]*" + k + ":?\\**\\s*(.+)$", "im")); return x ? x[1].replace(/\*+/g, "").trim() : ""; };
+      const steps = txt.split("\n").map((l) => l.match(/^\s*\d+[.)]\s+(.+)/)).filter(Boolean).map((m) => m[1].replace(/\*+/g, "").trim()).slice(0, 12);
+      if (steps.length >= 2) {
+        const claim = tag("CLAIM"), conc = tag("THEREFORE"), title = tag("TITLE").replace(/^proof that\s+/i, "").slice(0, 48);
+        return { say: (tag("SUMMARY") || claim || "Here's the proof.") + "\n\nThe full proof is on the page, step by step.", proof: { claim, steps, conc }, title: title ? title.charAt(0).toUpperCase() + title.slice(1) : "", draw: false, sketch: "none", source: "live" };
+      }
     }
     if (state.mode === "live" && opts.task === "quiz") {
       // the JSON prompt drops the questions on the small model; ask plainly
