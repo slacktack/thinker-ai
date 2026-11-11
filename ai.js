@@ -107,24 +107,26 @@
     "Think in at most 4 short lines (under 60 words), then answer.",
     "Rules:",
     "- Answer the QUESTION. Older notes and thread are background only; never answer an older question again.",
-    "- One move, max 45 words: the standard textbook fact or one plain sentence that makes it click, then one question.",
+    "- Explain properly in 2 to 4 sentences (40 to 90 words): the core fact, why it is true or how it happens, and one concrete example. Then one short question to check they got it.",
     "- Use only well-established facts. Never invent numbers, names or formulas.",
+    "- For good-or-bad questions about a person, event or policy, never give a one-word verdict: name the main contributions, the main criticisms, then ask what they weigh more.",
     "- If they name a problem you don't know by name (e.g. a LeetCode title), don't guess: say you don't know that exact problem and ask them to paste the statement.",
     "- If you are not sure what they mean, ask one short clarifying question instead of guessing.",
     "- Reply in English. Only if the writer writes in Hindi or Hinglish, reply in Hinglish using Latin script.",
     "- say is your final answer only: no thinking out loud, no 'Wait', no self-corrections.",
-    "- For coding problems give only the next hint (the idea or what to track) and a question; never the full recurrence, solution or code.",
-    "- Never write their notes, full solutions or complete code. If they ask for full code, say you'll guide them instead and give the first step as a hint.",
+    "- For coding problems explain the approach: the key idea, what to track, and the time complexity. Code is handled separately when they ask for it.",
+    "- Never write their notes for them.",
     "- Plain text only: no LaTeX, no $ signs, no markdown. Write math in plain text, using ^ for powers.",
+    "- In say, wrap the 1 to 3 most important terms or phrases in single asterisks, like *photosynthesis*.",
     "- If the answer has a key formula, put it in formula and explain each symbol in terms.",
     "- If the idea is a process or algorithm, put 3 to 6 steps in steps, each 6 words max, in order.",
     "- Numbers and calculations go in work (one calculation per line, with its result), never in say. When there are numbers, say stays short reasoning, max 30 words.",
     "- draw=true when a picture helps them see it; pick the closest sketch, else none.",
-    'Output JSON only: {"say": string, "title": "2-5 word note title for this topic", "formula": string or null, "terms": [[symbol, meaning]], "steps": [string], "work": [string], "draw": boolean, "sketch": "' + SKETCH_KEYS.join("|") + '"}',
+    'Output JSON only: {"say": "2 to 4 sentences that explain it, with the key terms in *asterisks*", "title": "2-5 word note title for this topic", "formula": string or null, "terms": [[symbol, meaning]], "steps": [string], "work": [string], "draw": boolean, "sketch": "' + SKETCH_KEYS.join("|") + '"}',
   ].join("\n");
 
   // The thinking call only gets the facts right: tiny schema, so its reasoning stays short.
-  const SYSTEM_FACTS = SYSTEM.split("\n").filter((l) => !/formula|steps|work|draw=|Output JSON|title/.test(l)).concat('Output JSON only: {"say": string}').join("\n");
+  const SYSTEM_FACTS = SYSTEM.split("\n").filter((l) => !/formula|steps|work|draw=|Output JSON|title/.test(l)).concat('Output JSON only: {"say": "2 to 4 sentences that explain it, with the key terms in *asterisks*"}').join("\n");
 
   // What each slash command means, in words the model can follow.
   const TASK_HINT = {
@@ -142,11 +144,21 @@
     "Use only standard textbook facts. Plain text only: no LaTeX, no $ signs, no markdown. Write math in plain text, using ^ for powers.",
     'Output JSON only: {"sections": [{"title": string, "idea": string, "formula": string or null, "example": string, "derive": [string]}]}',
   ].join("\n");
+  const SYSTEM_CODE = [
+    "You are a coding tutor. The writer asked for code.",
+    "Line 1: TITLE: a 2 to 5 word note title, e.g. TITLE: Two Sum in C++",
+    "Line 2: SUMMARY: one sentence with the key idea and its complexity.",
+    "Then explain it thoroughly in plain sentences, one short paragraph each: 1) the brute-force idea and why it is slow, 2) the better idea and why it works, 3) a step-by-step walk through a tiny example input, 4) time and space complexity. Wrap the 3 to 5 most important terms in single asterisks, like *hash map*.",
+    "Then give the complete, correct, runnable code in ONE fenced block with the language tag, in the language they asked for (default Python). Short comments only where they help.",
+    "Then one sentence on a common mistake to avoid. Nothing else: no headings, no extra code blocks.",
+  ].join("\n");
+  const WANTS_CODE = /\b(code|coding it|program|implement\w*|snippet|write (a |the |me )?(function|program|solution|script|class))\b|\b(in|using|with)\s+(c\+\+|cpp|java|python|py|javascript|js|typescript|ts|golang|go|rust|kotlin|swift|c#|c)(?![\w+#])/i;
   const WANTS_LESSON = /\b(all|each|every|list|compare|comparison|differences?|types of|kinds of|laws|pillars|principles|derive|derivation|prove|with examples?|and examples?|in detail|step by step|full explanation)\b|\b\d+\s+(laws|pillars|types|principles|rules|stages|steps|phases|kinds)\b/i;
 
   // Stable prefix first (note, thread) so the server's prompt cache reuses it; the changing ask goes last.
   // a hand-drawn sketch only when the question names its exact subject
   const EXACT = { twosum: /two\s?sum/i, linkedlist: /linked\s?list/i, binarysearch: /binary\s?search/i, recursion: /recursi|fibonacci|fib\(/i, nqueens: /n.?queens/i, incline: /inclin|slope|ramp/i, bigo: /big.?o\b|time complexity|space complexity/i };
+  const HINGLISH = /\b(kya|hai|hota|hoti|kaise|kyun|kyu|samjhao|samjha|batao|bata|mujhe|nahi|karna|karte|matlab|aur|yeh|ye|ache|acha|achha|accha|bure|bura|tha|thi|kaun|kab|kahan|kaisa|kaisi)\b/i;
   const NOTE_CHARS = 64000, HIST_TURNS = 8;
   function latestLine(t) { const ls = String(t || "").split(/\n+/).map((x) => x.trim()).filter(Boolean); return (ls[ls.length - 1] || "").slice(-400); }
   function buildMessages({ noteText, message, persona, intent, task, history }, system) {
@@ -157,6 +169,7 @@
       hist ? "THREAD:\n" + hist : "",
       [persona && persona !== "Thinker" ? "Persona: " + persona + "." : "", intent ? "Intent: " + intent + "." : "", "Task: " + (task || "margin") + "."].filter(Boolean).join(" "),
       TASK_HINT[intent && task === "chat" ? intent : task] ? "TASK: " + TASK_HINT[intent && task === "chat" ? intent : task] : "",
+      HINGLISH.test(message || "") ? "LANGUAGE: the writer used Hinglish. Write say in Hinglish (Hindi in Latin script, e.g. 'Recursion matlab function khud ko call karta hai')." : "",
       message ? "QUESTION (answer this, not anything older): " + message : "The writer paused on the last lines of the note. Speak only if something deserves a second look.",
     ].filter(Boolean).join("\n\n");
     if (message) ctx = "QUESTION: " + message + "\n\n" + ctx;
@@ -203,6 +216,25 @@
     }
     if (!opts.message && latestLine(opts.noteText)) opts = Object.assign({}, opts, { message: latestLine(opts.noteText) });
     await health();
+    if (state.mode === "live" && WANTS_CODE.test(opts.message || "") && opts.task !== "quiz" && opts.task !== "vent") {
+      const r = await chat({ messages: [{ role: "system", content: SYSTEM_CODE }, ...buildMessages(opts).slice(1)], thinking: !!opts.deep, max_tokens: opts.deep ? 3000 : 1300, temperature: 0.2, signal: timeout(opts.deep ? 90000 : 60000) }).catch(() => null);
+      const m = String((r && r.content) || "").match(/```([\w+#-]*)[^\n]*\n([\s\S]*?)(```|$)/);
+      if (m && m[2].trim()) {
+        const tag = (k) => { const x = r.content.match(new RegExp("^[\\s*#]*" + k + ":?\\**\\s*(.+)$", "im")); return x ? x[1].replace(/[*"#`]/g, "").trim() : ""; };
+        const title = tag("TITLE").slice(0, 48), summary = tag("SUMMARY");
+        const text = r.content.replace(m[0], "\n").replace(/^[\s*#]*(TITLE|SUMMARY):.*$/gim, "").replace(/\n{3,}/g, "\n\n").replace(/^#+\s*/gm, "").replace(/\*\*(.+?)\*\*/g, "*$1*").trim();
+        const exact = Object.keys(EXACT).find((k) => EXACT[k].test(opts.message));
+        const lead = (text.split(/\n\s*\n/)[0] || "").split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
+        return { say: (summary || lead.replace(/`/g, "") || "Here's a clean solution.") + "\n\nFull walkthrough and code are on the page.", explain: text, code: { lang: m[1] || "", src: m[2].replace(/^ (?=\S)/, "").replace(/\s+$/, "") }, draw: !!exact, sketch: exact || "none", title, source: "live" };
+      }
+    }
+    if (state.mode === "live" && MAP_RE.test(opts.message || "")) {
+      const r = await chat({ messages: [{ role: "system", content: SYSTEM_MAP }, ...buildMessages(opts).slice(1)], thinking: !!opts.deep, max_tokens: opts.deep ? 2500 : 700, temperature: 0.2, response_format: { type: "json_object" }, signal: timeout(45000) }).catch(() => null);
+      const p = (r && safeJSON(r.content)) || {};
+      const out = normalize(Object.assign({ say: "Here's a rough map of India for this." }, p, { say: typeof p.say === "string" && p.say.trim() ? p.say : "Here's a rough map of India for this." }));
+      out.draw = true; out.sketch = "map:" + encodeURIComponent(JSON.stringify(mapSpec(opts.message, p)));
+      return out;
+    }
     if (state.mode === "live" && opts.task === "quiz") {
       // the JSON prompt drops the questions on the small model; ask plainly
       const r = await chat({ messages: [{ role: "system", content: "Write exactly 3 short numbered quiz questions about the topic, easiest first. One per line. No answers, no intro." }, { role: "user", content: "Topic: " + clip(opts.message || tail(opts.noteText, 400), 300) }], thinking: false, max_tokens: 200, temperature: 0.4, signal: timeout(20000) }).catch(() => null);
@@ -240,10 +272,6 @@
         if (eq && parsed && typeof parsed.say === "string" && parsed.say.trim()) { const o = normalize(parsed); o.draw = true; o.sketch = "equation:" + eq; return o; }
         if (parsed && typeof parsed.say === "string" && parsed.say.trim()) {
           const out = normalize(parsed);
-          // safety net: a tutor never hands over a code dump
-          if (/#include|\bdef \w+\(|\bint main\b|\bfunction \w+\(|(;\s*\n.*){3}/.test(out.say)) {
-            out.say = "I won't hand you the full code, but let's build it together. What's the simplest version that works, even if it's slow? Write that first and I'll help you sharpen it.";
-          }
           if (opts.task === "vent" || opts.task === "quiz") { out.draw = false; out.sketch = "none"; return out; }
           if (/\b(could you|can you|please) (share|paste|explain|clarify|give)|\bnot sure\b|\bnot familiar\b|don'?t know (that|this)/i.test(out.say)) { out.draw = false; out.sketch = "none"; return out; }
           const secs = lesson && Array.isArray(lesson.sections) ? lesson.sections.filter((x) => x && x.title).slice(0, 5).map((x) => ({
@@ -262,7 +290,7 @@
           const sents = out.say.split(/(?<=[.!?])\s+(?=[A-Z(])/), isCalc = (x) => /\d[^.]*[=≈][^.]*\d/.test(x);
           const calcs = sents.filter(isCalc);
           if (calcs.length) {
-            work = work.concat(calcs.map((x) => fixArithmetic(x.trim()))).slice(0, 8);
+            work = work.concat(calcs.map((x) => fixArithmetic(x.replace(/\*(?=[A-Za-z])|(?<=[A-Za-z])\*/g, "").trim()))).slice(0, 8);
             const rest = sents.filter((x) => !isCalc(x)).join(" ").trim();
             out.say = rest ? rest + " The numbers are worked out on the page." : "Worked out step by step on the page.";
           }
@@ -343,7 +371,15 @@
     let sketch = SKETCH_KEYS.includes(p.sketch) ? p.sketch : "none";
     const draw = !!p.draw && sketch !== "none";
     p.say = String(p.say).replace(/\\n/g, "\n");
-    return { title: typeof p.title === "string" ? p.title.replace(/["$]/g, "").trim().slice(0, 48) : "", say: tidy(String(p.say).replace(/\$+/g, "").replace(/\\\(|\\\)/g, "").trim()), draw, sketch: draw ? sketch : "none", source: "live" };
+    const title = typeof p.title === "string" ? p.title.replace(/["$]/g, "").trim().slice(0, 48) : "";
+    let say = tidy(String(p.say).replace(/\$+|`/g, "").replace(/\\\(|\\\)/g, "").trim());
+    if (!/\*\S/.test(say)) {
+      // model marked nothing: underline the topic's first mention
+      const topic = title.replace(/^(what|how|why|when|the|a|an|is|are|does|do|solving|understanding|intro to|basics of)\s+/gi, "").replace(/\s+(works?|basics|explained|example)$/i, "").trim();
+      const re = topic.length > 2 && new RegExp("\\b(" + topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")\\b", "i");
+      if (re && re.test(say)) say = say.replace(re, "*$1*");
+    }
+    return { title, say, draw, sketch: draw ? sketch : "none", source: "live" };
   }
 
   /* ---------- contextual local mind (offline fallback) ----------
@@ -608,6 +644,75 @@
      labels .fade. All paused until the container gets .play (on scroll
      into view), then d1..d10 stagger the sequence so it scribbles live. */
   let SK_UID = 0;
+  // rough India map data [lat, lon]; a hand-drawn study map, not survey-accurate
+  const INDIA = {
+    outline: [[37.0,74.6],[36.6,76.0],[35.8,77.8],[35.6,79.0],[35.2,80.3],[34.0,79.4],[32.7,79.5],[31.3,79.0],[30.9,80.0],[30.2,81.0],[28.8,80.1],[28.6,81.2],[27.5,83.3],[26.7,85.2],[26.5,86.7],[26.4,88.0],[27.1,88.0],[28.0,88.7],[27.2,88.9],[26.8,89.1],[26.8,91.9],[27.8,91.6],[28.0,92.5],[28.6,94.0],[29.3,95.3],[29.4,96.1],[28.2,97.4],[27.3,97.1],[27.0,96.2],[26.0,95.2],[25.0,94.6],[24.1,94.2],[23.4,93.4],[22.1,93.2],[21.9,92.6],[23.3,91.9],[24.3,92.2],[25.2,92.4],[25.2,90.0],[26.0,89.8],[25.3,88.5],[24.2,88.7],[22.6,89.0],[21.6,88.9],[21.5,87.5],[20.3,86.7],[19.3,84.9],[17.7,83.3],[16.3,81.7],[15.9,80.9],[14.5,80.2],[13.1,80.3],[11.9,79.8],[10.3,79.8],[9.3,79.2],[8.1,77.5],[8.9,76.5],[10.0,76.2],[11.2,75.8],[12.9,74.8],[14.8,74.1],[15.5,73.8],[17.0,73.3],[18.9,72.8],[20.0,72.7],[21.1,72.6],[22.3,72.6],[21.0,72.0],[20.8,71.0],[21.6,69.6],[22.4,69.1],[22.9,70.5],[23.6,68.4],[24.3,68.8],[24.6,71.1],[25.7,70.2],[26.6,70.1],[27.8,70.6],[28.0,72.2],[29.0,73.3],[30.1,73.9],[31.0,74.6],[32.5,74.7],[32.8,74.0],[33.7,73.8],[34.5,73.0],[35.4,72.6],[36.4,73.1],[37.0,74.6]],
+    rivers: {
+      Ganga: [[30.9,79.1],[29.9,78.2],[26.45,80.3],[25.4,81.9],[25.3,83.0],[25.6,85.1],[24.8,87.9],[23.5,88.3],[21.8,88.2]],
+      Yamuna: [[31.0,78.4],[28.6,77.25],[27.2,78.0],[26.4,79.5],[25.4,81.9]],
+      Brahmaputra: [[28.2,95.3],[27.5,94.9],[26.6,93.0],[26.2,91.7],[26.0,89.9]],
+      Indus: [[32.6,79.6],[34.2,77.6],[35.0,75.5],[35.6,74.6]],
+      Narmada: [[22.7,81.75],[23.1,79.9],[22.5,77.5],[21.9,75.0],[21.7,72.9]],
+      Tapi: [[21.8,78.25],[21.3,76.0],[21.1,74.5],[21.1,72.7]],
+      Godavari: [[19.9,73.5],[19.15,77.3],[18.8,79.5],[17.6,81.0],[17.0,81.8],[16.6,82.3]],
+      Krishna: [[17.9,73.65],[16.8,74.6],[16.3,76.0],[16.1,78.9],[16.5,80.6],[15.9,81.1]],
+      Kaveri: [[12.4,75.5],[12.4,76.7],[11.8,77.8],[10.85,78.7],[11.1,79.8]],
+      Mahanadi: [[20.1,81.9],[21.2,82.3],[21.5,83.9],[20.5,85.9],[20.3,86.7]],
+      Chambal: [[22.5,75.7],[25.2,75.8],[26.5,78.0],[26.5,79.2]],
+      Son: [[22.7,81.8],[24.0,81.9],[24.6,83.5],[25.6,84.9]],
+    },
+    ranges: {
+      Himalayas: [[34.5,76.0],[32.0,78.0],[30.5,79.8],[29.0,81.5],[27.6,88.4],[27.8,92.0],[28.5,95.0]],
+      "Western Ghats": [[21.0,73.8],[18.5,73.6],[15.5,74.2],[12.5,75.5],[10.0,77.0],[8.4,77.3]],
+      "Eastern Ghats": [[21.5,85.5],[18.5,83.0],[16.0,79.5],[13.5,78.8],[11.5,78.2]],
+      Vindhyas: [[23.0,74.5],[23.5,77.5],[24.5,80.5],[24.8,83.0]],
+      Satpuras: [[21.6,74.5],[21.9,77.0],[22.4,79.5],[22.5,81.5]],
+      Aravallis: [[24.4,72.7],[25.5,73.6],[26.9,75.8],[28.4,77.1]],
+    },
+    cities: { Delhi:[28.6,77.2], Mumbai:[19.08,72.88], Kolkata:[22.57,88.36], Chennai:[13.08,80.27], Bengaluru:[12.97,77.59], Hyderabad:[17.39,78.49], Ahmedabad:[23.02,72.57], Jaipur:[26.91,75.79], Lucknow:[26.85,80.95], Patna:[25.6,85.1], Bhopal:[23.26,77.41], Thiruvananthapuram:[8.52,76.94], Bhubaneswar:[20.3,85.82], Guwahati:[26.14,91.74], Srinagar:[34.08,74.8], Shimla:[31.1,77.17], Chandigarh:[30.73,76.78], Dehradun:[30.32,78.03], Raipur:[21.25,81.63], Ranchi:[23.34,85.31], Gandhinagar:[23.22,72.65], Panaji:[15.49,73.83], Amaravati:[16.51,80.52], Itanagar:[27.08,93.6], Shillong:[25.58,91.89], Imphal:[24.82,93.94], Kohima:[25.67,94.11], Aizawl:[23.73,92.72], Agartala:[23.83,91.29], Gangtok:[27.33,88.61], Varanasi:[25.32,83.0], Prayagraj:[25.43,81.85], Mathura:[27.49,77.67], Pandharpur:[17.68,75.33], Puri:[19.81,85.83], Ayodhya:[26.8,82.2], Madurai:[9.93,78.12], Amritsar:[31.63,74.87], Leh:[34.15,77.58], Kanyakumari:[8.08,77.55], Pune:[18.52,73.86], Nagpur:[21.15,79.09], Agra:[27.18,78.01], Surat:[21.17,72.83], Kochi:[9.93,76.27], Mysuru:[12.3,76.64], Kanpur:[26.45,80.33], Indore:[22.72,75.86], Udaipur:[24.58,73.71], Jodhpur:[26.24,73.02] },
+    states: { "Jammu and Kashmir":[33.8,75.0], Ladakh:[34.5,77.5], "Himachal Pradesh":[31.9,77.2], Punjab:[30.9,75.4], Haryana:[29.1,76.1], Uttarakhand:[30.1,79.0], Rajasthan:[26.6,73.8], "Uttar Pradesh":[27.0,80.9], Bihar:[25.8,85.6], Sikkim:[27.5,88.5], "Arunachal Pradesh":[28.0,94.5], Assam:[26.3,92.8], Nagaland:[26.1,94.5], Manipur:[24.8,93.9], Mizoram:[23.4,92.8], Tripura:[23.8,91.6], Meghalaya:[25.5,91.3], "West Bengal":[23.8,87.9], Jharkhand:[23.6,85.3], Odisha:[20.5,84.4], Chhattisgarh:[21.3,81.9], "Madhya Pradesh":[23.5,78.3], Gujarat:[22.7,71.6], Maharashtra:[19.4,76.1], Telangana:[17.9,79.0], "Andhra Pradesh":[15.9,79.7], Karnataka:[15.0,75.7], Goa:[15.4,74.0], Kerala:[10.4,76.4], "Tamil Nadu":[11.0,78.4] },
+  };
+  const MAP_RE = /\b(map|mapping)\b.*\b(india|indian|states?|rivers?|mountains?|ranges?|cities)\b|\b(india|indian)\b.*\bmap\b|\bon (a|the) map\b/i;
+  const SYSTEM_MAP = [
+    "You help a UPSC student with a rough hand-drawn map of India.",
+    "say: 2 to 4 sentences explaining what the map shows and why it matters, key terms in *asterisks*.",
+    "places: up to 10 specific places, people or sites the question is about (not rivers or mountain ranges). For each give the Indian state it is in and the nearest well-known city.",
+    'Output JSON only: {"say": string, "title": "2-5 word title", "caption": "short map caption", "places": [{"name": string, "state": string, "city": string}]}',
+  ].join("\n");
+  function findKey(obj, name) { const n = String(name || "").toLowerCase().replace(/[^a-z ]/g, "").trim(); return n ? Object.keys(obj).find((k) => k.toLowerCase() === n || n.includes(k.toLowerCase())) : null; }
+  // place = known city, else its city, else its state's centre
+  function mapSpec(q, p) {
+    const layers = new Set(); // only what the question names; the model over-adds
+    if (/river/i.test(q)) layers.add("rivers");
+    if (/mountain|range|ghats|himalaya|hill/i.test(q)) layers.add("ranges");
+    if (/capital|cities|city/i.test(q)) layers.add("capitals");
+    const pts = [];
+    (Array.isArray(p.places) ? p.places : []).slice(0, 10).forEach((x) => {
+      if (!x || !x.name || /\b(river|india|ocean|sea|range|ghats|mountains?)\b/i.test(x.name) || findKey(INDIA.rivers, x.name) || findKey(INDIA.ranges, x.name)) return;
+      const k = findKey(INDIA.cities, x.name) || findKey(INDIA.cities, x.city), s = !k && findKey(INDIA.states, x.state);
+      const at = k ? INDIA.cities[k] : s ? INDIA.states[s] : null;
+      if (at) pts.push({ n: String(x.name).slice(0, 28), at });
+    });
+    return { t: String(p.title || p.caption || "India").replace(/[*"]/g, "").slice(0, 40), layers: [...layers].filter((l) => /^(rivers|ranges|capitals)$/.test(l)), pts };
+  }
+  function mapSVG(spec) {
+    const W = 400, x = (lon) => 20 + (lon - 68) * 11.6, y = (lat) => 40 + (37.5 - lat) * 11.6;
+    const E = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const path = (pts) => pts.map(([la, lo], i) => (i ? "L" : "M") + x(lo).toFixed(1) + " " + y(la).toFixed(1)).join(" ");
+    const lab = (px, py, s, cls) => '<text class="label fade ' + cls + '" x="' + px.toFixed(1) + '" y="' + py.toFixed(1) + '">' + E(s) + "</text>";
+    let o = lab(20, 22, spec.t, "big d1") + '<path class="stroke draw d1" pathLength="1" d="' + path(INDIA.outline) + 'Z"/>';
+    if (spec.layers.includes("rivers")) Object.entries(INDIA.rivers).forEach(([n, r]) => { const m = r[Math.floor(r.length / 2)]; o += '<path class="stroke river draw d3" pathLength="1" d="' + path(r) + '"/>' + lab(x(m[1]) + 4, y(m[0]) - 4, n, "small d3"); });
+    if (spec.layers.includes("ranges")) Object.entries(INDIA.ranges).forEach(([n, r]) => { const m = r[Math.floor(r.length / 2)]; o += '<path class="stroke range draw d5" pathLength="1" d="' + path(r) + '"/>' + lab(x(m[1]) + 5, y(m[0]) + 12, n, "small d5"); });
+    const dots = spec.pts.slice();
+    if (spec.layers.includes("capitals")) ["Delhi", "Mumbai", "Kolkata", "Chennai", "Bengaluru", "Hyderabad", "Jaipur", "Lucknow", "Patna", "Bhopal", "Guwahati", "Thiruvananthapuram"].forEach((c) => dots.push({ n: c, at: INDIA.cities[c] }));
+    const seen = {};
+    dots.forEach((d, i) => {
+      const key = d.at.join(), k = (seen[key] = (seen[key] || 0) + 1) - 1, px = x(d.at[1]), py = y(d.at[0]) + k * 13;
+      o += '<circle class="pop d7" cx="' + px.toFixed(1) + '" cy="' + py.toFixed(1) + '" r="3.2" fill="currentColor"/>' + lab(px + 6, py + 4, d.n, "small d7");
+    });
+    return { o, vb: "0 0 " + W + " " + (y(6) + 10).toFixed(0) };
+  }
+
   function sketchSVG(key) {
     const P = 'pathLength="1"';
     function delayNum(el) {
@@ -695,7 +800,7 @@
         Object.values(adj).forEach((l) => l.sort((a, b) => a[0].localeCompare(b[0])));
         const weighted = kind === "dijkstra";
         const line = (u, v, cls) => { const [x1, y1] = pos[u], [x2, y2] = pos[v]; return '<path class="stroke draw ' + cls + '" ' + P + ' d="M' + x1 + " " + y1 + " L" + x2 + " " + y2 + '"/>'; };
-        let o = tx(20, 20, kind === "dijkstra" ? "Dijkstra from A: settle the closest unsettled node, then relax its edges." : kind === "bfs" ? "BFS from A: a queue visits the graph level by level." : "DFS from A: go as deep as you can, then backtrack.", "big");
+        let o = tx(20, 20, kind === "dijkstra" ? "Dijkstra: settle the closest node, relax its edges." : kind === "bfs" ? "BFS from A: a queue visits the graph level by level." : "DFS from A: go as deep as you can, then backtrack.", "big");
         ed.forEach(([u, v, w]) => { o += line(u, v, "d1"); if (weighted) { const [x1, y1] = pos[u], [x2, y2] = pos[v]; o += tx((x1 + x2) / 2 + 7, (y1 + y2) / 2 - 6, w, "small d1 wt"); } });
         N.forEach((n) => { const [x, y] = pos[n]; o += '<circle class="node-c pop d1" cx="' + x + '" cy="' + y + '" r="15"/>' + tx(x, y + 5, n, "d1 node-l", 1); });
         const rowsLab = kind === "dijkstra" ? ["dist", "prev"] : kind === "bfs" ? ["level", "from"] : ["order", "from"];
@@ -865,6 +970,7 @@
       }
     }
     if (/^equation:/.test(key)) return eqSVG(key.slice(9));
+    if (/^map:/.test(key)) { let sp; try { sp = JSON.parse(decodeURIComponent(key.slice(4))); } catch (e) { sp = { t: "India", layers: [], pts: [] }; } const m = mapSVG(sp); return wrap(m.o, m.vb); }
     if (/^lesson:/.test(key)) {
       let ss; try { ss = JSON.parse(decodeURIComponent(key.slice(7))); } catch (e) { ss = []; }
       const e = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -1119,15 +1225,21 @@
     opts = opts || {};
     const speed = opts.speed || 42;
     el.innerHTML = "";
-    const words = String(text).split(/(\s+)/);
     const spans = [];
-    words.forEach((w) => {
-      if (/^\s+$/.test(w)) { el.appendChild(document.createTextNode(w)); return; }
-      const s = document.createElement("span");
-      s.className = "ink-word";
-      s.textContent = w;
-      el.appendChild(s);
-      spans.push(s);
+    // *key* phrases get a .key wrapper; odd parts of the split are the keys
+    String(text).split(KEY_RE).forEach((seg, k) => {
+      if (k % 3 === 1) { if (seg) el.appendChild(document.createTextNode(seg)); return; }
+      let parent = el;
+      if (k % 3 === 2) { parent = document.createElement("span"); parent.className = "key"; el.appendChild(parent); }
+      seg.split(/(\s+)/).forEach((w) => {
+        if (!w) return;
+        if (/^\s+$/.test(w)) { parent.appendChild(document.createTextNode(w)); return; }
+        const s = document.createElement("span");
+        s.className = "ink-word";
+        s.textContent = w;
+        parent.appendChild(s);
+        spans.push(s);
+      });
     });
     let i = 0, cancelled = false;
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1144,8 +1256,15 @@
     return { cancel() { cancelled = true; spans.forEach((s) => s.classList.add("on")); }, done };
   }
 
+  // "*term*" but not "3*4": the star must not touch a word character outside
+  const KEY_RE = /(^|[^\w*])\*(?=\S)([^*\n]{1,80}?\S)\*(?!\w)/;
+  function inkHTML(text) {
+    const e = (x) => x.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    return String(text).split(KEY_RE).map((seg, k) => (k % 3 === 2 ? '<span class="key">' + e(seg) + "</span>" : e(seg))).join("").replace(/`([^`\n]+)`/g, '<code class="ic">$1</code>');
+  }
+
   window.ThinkerAI = {
-    health, chat, see, tts, stt, respond, localMind, sketchSVG, revealWords,
+    health, chat, see, tts, stt, respond, localMind, sketchSVG, revealWords, inkHTML,
     get mode() { return state.mode; },
     SKETCH_KEYS,
   };

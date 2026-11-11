@@ -223,7 +223,7 @@
     chip.onclick = (ev) => { ev.stopPropagation(); replyTo(r.id); };
     body.appendChild(chip);
     card._rid = r.id; card.appendChild(dot); card.appendChild(body);
-    if (instant) text.textContent = r.text.replace(/\$+/g, ""); else AI.revealWords(text, r.text);
+    if (instant) text.innerHTML = AI.inkHTML(r.text.replace(/\$+/g, "")); else AI.revealWords(text, r.text);
     card.onclick = () => replyTo(r.id);
     return card;
   }
@@ -259,7 +259,9 @@
   }
 
   async function think(opts) {
-    if (responding) return;
+    // queue behind the current answer instead of dropping the message
+    if (responding && (opts.task || "margin") === "margin") return;
+    while (responding) await wait(200);
     readingCue(false);
     const n = active();
     responding = true;
@@ -281,7 +283,9 @@
     const card = document.createElement("div"); card.className = "margin-card enter";
     card.style.setProperty("--ink-pen", inkVar(n.ink));
     card.innerHTML = '<span class="ink-dot is-fresh"></span><div class="body"><span class="status-line"><svg class="quill"><use href="#i-quill"/></svg><span class="dots">' + (opts.deep ? "Thinking deeper" : opts.task === "draw" ? "Sketching it" : opts.task === "margin" ? "Reading along" : "Thinking") + "</span></span></div>";
-    const t0 = Date.now(), tick = setInterval(() => { const st = card.querySelector(".status-line"); if (!st) return clearInterval(tick); let el = st.querySelector(".secs"); if (!el) { el = document.createElement("span"); el.className = "secs"; st.appendChild(el); } el.textContent = "thinking it through · " + Math.round((Date.now() - t0) / 1000) + "s"; }, 1000);
+    const t0 = Date.now(), tick = setInterval(() => { const st = card.querySelector(".status-line"); if (!st) return clearInterval(tick); let el = st.querySelector(".secs"); if (!el) { el = document.createElement("span"); el.className = "secs"; st.appendChild(el); } const secs = Math.round((Date.now() - t0) / 1000), stages = opts.deep ? ["Reading your question", "Working through it", "Checking the reasoning", "Almost there"] : ["Reading your question", "Finding the key idea", "Writing it out"];
+      if (!card.querySelector(".draft-text")) st.querySelector(".dots").textContent = stages[Math.min(stages.length - 1, Math.floor(secs / (opts.deep ? 5 : 2)))];
+      el.textContent = secs >= 3 ? secs + "s" : ""; }, 1000);
     col.appendChild(card);
 
     const hist = noteHistory(n);
@@ -295,7 +299,7 @@
         // show the quick take now; the thought-through answer replaces it
         const st = card.querySelector(".status-line"); if (!st) return;
         let d = card.querySelector(".draft-text"); if (!d) { d = document.createElement("span"); d.className = "draft-text"; st.before(d); }
-        d.textContent = draft; st.querySelector(".dots").textContent = "Double-checking";
+        d.textContent = draft.replace(/\*/g, ""); st.querySelector(".dots").textContent = "Double-checking";
         const b = document.createElement("button"); b.className = "follow-chip use-draft"; b.textContent = "Use this answer";
         b.onclick = (ev) => { ev.stopPropagation(); useNow(); }; st.after(b);
       });
@@ -322,7 +326,7 @@
     body.appendChild(chip);
     const q = opts.message || message;
     if (q && !opts.deep) {
-      const deeper = document.createElement("button"); deeper.className = "follow-chip"; deeper.textContent = "Think deeper";
+      const deeper = document.createElement("button"); deeper.className = "follow-chip deeper-chip"; deeper.title = "Slower, more careful answer"; deeper.innerHTML = "<span aria-hidden=\"true\">✦</span> Think deeper <span class=\"deeper-hint\">better answer</span>";
       deeper.onclick = (ev) => { ev.stopPropagation(); deeper.remove(); think({ task: opts.task === "margin" ? "chat" : opts.task, intent: opts.intent, message: q, cmd: "think deeper", deep: true }); };
       body.appendChild(deeper);
     }
@@ -330,8 +334,20 @@
     card.onclick = () => replyTo(r.id);
     await AI.revealWords(text, r.text).done;
 
+    // code answers read like a lesson: explanation, then the picture, then the code
+    if (res.code && res.explain) {
+      const ex = document.createElement("div"); ex.className = "code-explain";
+      ex.innerHTML = res.explain.split(/\n\s*\n/).map((p) => "<p>" + AI.inkHTML(p.trim()).replace(/\n/g, "<br>") + "</p>").join("");
+      $("noteBody").appendChild(ex);
+    }
     const lastSk = [...$("noteBody").querySelectorAll("[data-sketch]")].pop();
     if (res.draw && res.sketch && res.sketch !== "none" && !(lastSk && lastSk.dataset.sketch === res.sketch)) { await wait(250); insertSketch(res.sketch); }
+    if (res.code) {
+      const pre = document.createElement("pre"); pre.className = "code-block"; pre.setAttribute("contenteditable", "false");
+      if (res.code.lang) pre.dataset.lang = res.code.lang;
+      const code = document.createElement("code"); code.textContent = res.code.src; pre.appendChild(code);
+      $("noteBody").appendChild(pre); n.body = serializeBody();
+    }
     if (voiceOut) speak(shorten(r.text));
     responding = false;
     save(); renderSidebar();
@@ -350,7 +366,7 @@
   }
 
   function plainText(html) { const d = document.createElement("div"); d.innerHTML = html || ""; return d.textContent || ""; }
-  function shorten(s) { const words = String(s).split(/\s+/); return words.slice(0, 12).join(" "); }
+  function shorten(s) { const words = String(s).replace(/\*/g, "").split(/\s+/); return words.slice(0, 12).join(" "); }
 
   /* ---------------- threads ---------------- */
   let threadId = null;
@@ -360,7 +376,7 @@
     $("drawerTitle").textContent = "Follow the thought";
     const body = $("drawerBody"); body.innerHTML = "";
     const seedMsg = document.createElement("div"); seedMsg.className = "drawer-msg riddler";
-    seedMsg.innerHTML = '<span class="ink-dot" style="background:' + inkVar(r.ink) + '"></span><span>' + esc(r.text.replace(/\$+/g, "")) + "</span>";
+    seedMsg.innerHTML = '<span class="ink-dot" style="background:' + inkVar(r.ink) + '"></span><span>' + AI.inkHTML(r.text.replace(/\$+/g, "")) + "</span>";
     // a reply to a composer question: show the question first
     const th = r.thread || [], lead = th[0] && th[0].who === "you" ? 1 : 0;
     th.slice(0, lead).forEach((m) => body.appendChild(threadMsg(m)));
@@ -373,7 +389,7 @@
     const d = document.createElement("div");
     d.className = "drawer-msg " + (m.who === "you" ? "you" : "riddler");
     if (m.who === "you") d.textContent = m.text;
-    else d.innerHTML = '<span class="ink-dot"></span><span>' + esc(m.text) + "</span>";
+    else d.innerHTML = '<span class="ink-dot"></span><span>' + AI.inkHTML(m.text) + "</span>";
     return d;
   }
   async function sendThread() {
@@ -859,7 +875,7 @@
       if (menu.classList.contains("open")) {
         if (e.key === "ArrowDown") { e.preventDefault(); cmdSel = Math.min(cmdSel + 1, (menu._items || []).length - 1); renderCmdMenu($("composerInput").value.split(" ")[0]); return; }
         if (e.key === "ArrowUp") { e.preventDefault(); cmdSel = Math.max(cmdSel - 1, 0); renderCmdMenu($("composerInput").value.split(" ")[0]); return; }
-        if (e.key === "Enter") { e.preventDefault(); const c = (menu._items || [])[cmdSel]; if (c) runCommand(c); return; }
+        if (e.key === "Enter") { e.preventDefault(); const v = $("composerInput").value.trim(), c = (menu._items || [])[cmdSel]; if (/\s/.test(v)) { menu.classList.remove("open"); composerSubmit(); } else if (c) runCommand(c); return; }
         if (e.key === "Escape") { menu.classList.remove("open"); return; }
       }
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); composerSubmit(); }
