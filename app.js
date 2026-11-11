@@ -915,7 +915,7 @@
             const added = txt.length - lastBody.length;
             if (added > 12 || /[.!]$/.test(txt.trim())) { lastBody = txt; cooldown = Date.now() + 6000; think({ task: "margin" }); }
           }
-        }, 1500);
+        }, /\?\s*$/.test(plainText(n.body)) ? 2500 : 4000);
       }
     };
 
