@@ -987,7 +987,8 @@ body { background-color: var(--paper); background-image: radial-gradient(color-m
 .modal:has(#personaList) { width: 440px; padding: 22px 22px 20px; }
 .modal:has(#personaList) h3 { font-size: 22px; margin: 4px 0 4px; }
 .modal:has(#personaList) .sub { font-size: 14px; margin-bottom: 14px; }
-#personaList { display: grid; gap: 2px; }
+#personaList { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+#personaList .persona-card { width: 100%; min-width: 0; }
 #personaList .persona-card { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 10px; background: transparent; box-shadow: none; transform: none; animation: none; opacity: 1; text-align: left; }
 #personaList .persona-card:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); transform: none; box-shadow: none; }
 #personaList .persona-card.selected { background: color-mix(in srgb, var(--ink) 7%, transparent); }
@@ -1017,7 +1018,7 @@ body { background-color: var(--paper); background-image: radial-gradient(color-m
 
 /* sidebar: delete on hover, inline folder name */
 .note-item { position: relative; }
-.note-item .note-del { margin-left: auto; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--faint); opacity: 0; transition: opacity .15s, color .15s, background .15s; }
+.note-item .note-del { margin-left: auto; flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--faint); opacity: 0; transition: opacity .15s, color .15s, background .15s; }
 .note-item .note-del svg { width: 14px; height: 14px; }
 .note-item:hover .note-del, .note-item:focus-visible .note-del { opacity: 1; }
 .note-item .note-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
@@ -1109,3 +1110,17 @@ body { background-color: var(--paper); background-image: radial-gradient(color-m
 .deeper-chip:hover { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent); }
 .deeper-hint { opacity: .7; font-weight: 400; }
 .deeper-hint::before { content: "· "; }
+@media (max-width: 760px) {
+  .editor-setup { flex-wrap: nowrap; overflow-x: auto; gap: 6px 16px; margin-bottom: 18px; padding-bottom: 12px; scrollbar-width: none; white-space: nowrap; }
+  .editor-setup::-webkit-scrollbar { display: none; }
+  .setup-brief-input { min-width: 150px; }
+  .note-body { min-height: 72px; }
+  .margin-you, .margin-card { scroll-margin-top: 72px; }
+  .note-body .inline-sketch, .code-block { scroll-margin-top: 72px; }
+}
+.sketch .faint { opacity: .35; }
+.note-title { font-family: "Fraunces", var(--serif); font-weight: 600; font-optical-sizing: auto; font-variation-settings: "SOFT" 50; font-size: clamp(38px, 4.8vw, 54px); letter-spacing: -0.025em; line-height: 1.04; position: relative; padding-bottom: 14px; }
+.note-title::after { content: ""; position: absolute; left: 2px; bottom: 0; width: 64px; height: 3px; border-radius: 3px; background: var(--accent); opacity: .85; }
+.note-title:empty::after { display: none; }
+@media (max-width: 760px) { .note-title { font-size: clamp(30px, 8.6vw, 40px); } }
+.later-line { display: flex; margin-top: 10px; }

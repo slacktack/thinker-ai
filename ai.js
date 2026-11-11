@@ -112,7 +112,7 @@
     "- For good-or-bad questions about a person, event or policy, never give a one-word verdict: name the main contributions, the main criticisms, then ask what they weigh more.",
     "- If they name a problem you don't know by name (e.g. a LeetCode title), don't guess: say you don't know that exact problem and ask them to paste the statement.",
     "- If you are not sure what they mean, ask one short clarifying question instead of guessing.",
-    "- Reply in English. Only if the writer writes in Hindi or Hinglish, reply in Hinglish using Latin script.",
+    "- Reply in simple, clear English, even when the question is in Hindi or Hinglish.",
     "- say is your final answer only: no thinking out loud, no 'Wait', no self-corrections.",
     "- For coding problems explain the approach: the key idea, what to track, and the time complexity. Code is handled separately when they ask for it.",
     "- Never write their notes for them.",
@@ -159,9 +159,14 @@
   // a hand-drawn sketch only when the question names its exact subject
   const EXACT = { twosum: /two\s?sum/i, linkedlist: /linked\s?list/i, binarysearch: /binary\s?search/i, recursion: /recursi|fibonacci|fib\(/i, nqueens: /n.?queens/i, incline: /inclin|slope|ramp/i, bigo: /big.?o\b|time complexity|space complexity/i };
   const HINGLISH = /\b(kya|hai|hota|hoti|kaise|kyun|kyu|samjhao|samjha|batao|bata|mujhe|nahi|karna|karte|matlab|aur|yeh|ye|ache|acha|achha|accha|bure|bura|tha|thi|kaun|kab|kahan|kaisa|kaisi)\b/i;
+  const SYSTEM_HINGLISH = [
+    "Translate the Hinglish (Hindi in Latin script) question into plain English. Output only the English question, one line.",
+    "Glossary: acha/accha/ache = good, bura/bure = bad, tha/thi/the at the end = was/were, ya = or, kya = what, kyun/kyu = why, kaise = how, kab = when, kaun = who, kahan = where, samjhao/batao = explain/tell me, samajh nahi aata = I don't understand, nahi = not, mujhe = me/I, hota hai = is, kiya = did, aaye = came, ne = (marks who did it).",
+    "Examples:", "Akbar ache the ya bure? → Was Akbar good or bad?", "mujhe graphs samajh nahi aata → I don't understand graphs, explain them.", "mughal kab aaye the? → When did the Mughals come?",
+  ].join("\n");
   const NOTE_CHARS = 64000, HIST_TURNS = 8;
   function latestLine(t) { const ls = String(t || "").split(/\n+/).map((x) => x.trim()).filter(Boolean); return (ls[ls.length - 1] || "").slice(-400); }
-  function buildMessages({ noteText, message, persona, intent, task, history }, system) {
+  function buildMessages({ noteText, message, persona, intent, task, history, hinglish }, system) {
     if (!message && latestLine(noteText)) message = latestLine(noteText);
     const hist = (history || []).slice(-HIST_TURNS).map((m) => (m.who === "you" ? "Writer: " : "Thinker: ") + truncate(m.text, 1200)).join("\n");
     let ctx = [
@@ -169,7 +174,7 @@
       hist ? "THREAD:\n" + hist : "",
       [persona && persona !== "Thinker" ? "Persona: " + persona + "." : "", intent ? "Intent: " + intent + "." : "", "Task: " + (task || "margin") + "."].filter(Boolean).join(" "),
       TASK_HINT[intent && task === "chat" ? intent : task] ? "TASK: " + TASK_HINT[intent && task === "chat" ? intent : task] : "",
-      HINGLISH.test(message || "") ? "LANGUAGE: the writer used Hinglish. Write say in Hinglish (Hindi in Latin script, e.g. 'Recursion matlab function khud ko call karta hai')." : "",
+      (hinglish || HINGLISH.test(message || "")) ? "LANGUAGE: the writer asked in Hinglish; answer in simple, clear English." : "",
       message ? "QUESTION (answer this, not anything older): " + message : "The writer paused on the last lines of the note. Speak only if something deserves a second look.",
     ].filter(Boolean).join("\n\n");
     if (message) ctx = "QUESTION: " + message + "\n\n" + ctx;
@@ -216,6 +221,12 @@
     }
     if (!opts.message && latestLine(opts.noteText)) opts = Object.assign({}, opts, { message: latestLine(opts.noteText) });
     await health();
+    // the small model misreads Hinglish ("the" = "were") and writes it garbled; translate, answer in English
+    if (state.mode === "live" && HINGLISH.test(opts.message || "")) {
+      const t = await chat({ messages: [{ role: "system", content: SYSTEM_HINGLISH }, { role: "user", content: opts.message }], thinking: false, max_tokens: 80, temperature: 0, signal: timeout(8000) }).catch(() => null);
+      const en = t && String(t.content || "").trim().split("\n")[0];
+      if (en && en.length < 300 && en.toLowerCase() !== opts.message.trim().toLowerCase()) opts = Object.assign({}, opts, { message: en, hinglish: true });
+    }
     if (state.mode === "live" && WANTS_CODE.test(opts.message || "") && opts.task !== "quiz" && opts.task !== "vent") {
       const r = await chat({ messages: [{ role: "system", content: SYSTEM_CODE }, ...buildMessages(opts).slice(1)], thinking: !!opts.deep, max_tokens: opts.deep ? 3000 : 1300, temperature: 0.2, signal: timeout(opts.deep ? 90000 : 60000) }).catch(() => null);
       const m = String((r && r.content) || "").match(/```([\w+#-]*)[^\n]*\n([\s\S]*?)(```|$)/);
@@ -259,7 +270,9 @@
         // second arg lets the user take the draft instead of waiting on the slow check
         const draft = (p) => { if (ok(p) && !settled && !drafted) { drafted = true; onDraft(normalize(p).say, () => useNow([p, null, null])); } };
         if (onDraft && deep) { quickP.then(draft); fastP.then(draft); }
-        const lessonP = opts.task === "explain" || (opts.task !== "quiz" && opts.task !== "vent" && WANTS_LESSON.test(opts.message || "")) ? chat({ messages: buildMessages(opts, SYSTEM_LESSON), thinking: false, max_tokens: 1400, temperature: 0.2, response_format: { type: "json_object" }, signal: timeout(45000) }).then((r) => safeJSON(r.content)).catch(() => null) : Promise.resolve(null);
+        const vk = opts.task !== "quiz" && opts.task !== "vent" ? vizKind(opts.message) : null;
+        const vizP = vk ? chat({ messages: [{ role: "system", content: VIZ[vk].ask }, { role: "user", content: "QUESTION: " + clip(opts.message, 400) }], thinking: true, max_tokens: 2500, temperature: 0.2, response_format: { type: "json_object" }, signal: timeout(70000) }).then((r) => safeJSON(r.content)).catch(() => null) : null;
+        const lessonP = vk ? Promise.resolve(null) : opts.task === "explain" || (opts.task !== "quiz" && opts.task !== "vent" && WANTS_LESSON.test(opts.message || "")) ? chat({ messages: buildMessages(opts, SYSTEM_LESSON), thinking: false, max_tokens: 1400, temperature: 0.2, response_format: { type: "json_object" }, signal: timeout(45000) }).then((r) => safeJSON(r.content)).catch(() => null) : Promise.resolve(null);
         // once the fast answer is in, give the lesson sheet at most 5s more
         const capped = (p) => Promise.race([p, fastP.then((f) => (ok(f) ? new Promise((r) => setTimeout(() => r(null), 5000)) : p))]);
         const [fast, slow, lesson] = await Promise.race([Promise.all([fastP, thinkP, capped(lessonP)]), skipP]);
@@ -278,6 +291,12 @@
             t: clip(String(x.title), 60), i: String(x.idea || "").replace(/\$+/g, ""), f: x.formula ? String(x.formula).replace(/\$+/g, "") : "",
             e: fixArithmetic(String(x.example || "").replace(/\$+/g, "")), d: (Array.isArray(x.derive) ? x.derive : []).slice(0, 4).map((y) => fixArithmetic(String(y).replace(/\$+/g, ""))) })) : [];
           if (secs.length >= 2) { out.draw = true; out.sketch = "lesson:" + encodeURIComponent(JSON.stringify(secs)); return out; }
+          // facts in a picture need the reasoning model; the answer goes out now, the visual follows
+          if (vizP) {
+            out.draw = false; out.sketch = "none"; out.laterLabel = { compare: "Drawing the comparison", timeline: "Drawing the timeline", cycle: "Drawing the cycle", tree: "Drawing the mind map" }[vk];
+            out.later = vizP.then((viz) => (viz && ((vk === "compare" && Array.isArray(viz.rows) && viz.rows.length >= 2) || (vk === "timeline" && Array.isArray(viz.events) && viz.events.length >= 3) || (vk === "cycle" && Array.isArray(viz.stages) && viz.stages.length >= 3) || (vk === "tree" && Array.isArray(viz.branches) && viz.branches.length >= 2)) ? "viz:" + encodeURIComponent(JSON.stringify({ k: vk, d: viz })) : null));
+            return out;
+          }
           const tr = algoTrace(opts.message || "");
           if (tr && !/complexit|big.?o/i.test(opts.message || "")) { out.draw = true; out.sketch = tr; return out; }
           // drawing priority: known topic from the question > formula > generic steps
@@ -713,6 +732,67 @@
     return { o, vb: "0 0 " + W + " " + (y(6) + 10).toFixed(0) };
   }
 
+  // data-driven study visuals: the question picks the kind, a small call fills it
+  const VIZ = {
+    compare: { re: /\b(vs\.?|versus|difference|differences|differ|compare|comparison|distinguish)\b/i, ask: 'Compare the two things asked. Output JSON only: {"title": "2-5 words", "a": "short name, max 2 words", "b": "short name, max 2 words", "rows": [[aspect, value for a, value for b]]} with 4 to 6 rows, each value at most 6 words. Example row: ["Purpose", "Growth and repair", "Making gametes"]. Standard textbook facts only.' },
+    timeline: { re: /\b(timeline|history of|chronolog\w*|events of|evolution of|movement|war|revolt|revolution|dynasty|empire|freedom struggle|phases of)\b/i, ask: 'Make a timeline of the key events asked about, oldest first. Output JSON only: {"title": "2-5 words", "events": [{"when": "year or period", "what": "at most 8 words"}]} with 4 to 7 events. Only dates you are sure of.' },
+    cycle: { re: /\b(cycle|cyclic|circular process|stages of)\b/i, ask: 'List the stages of the cycle asked about, in order. Output JSON only: {"title": "2-5 words", "stages": ["at most 4 words"]} with 3 to 6 stages.' },
+    tree: { re: /\b(types of|kinds of|classification|classify|parts of|components of|branches of|categories of|features of|mind ?map|structure of)\b/i, ask: 'Make a mind map of the topic asked. Output JSON only: {"title": "2-5 words", "root": "topic", "branches": [{"name": "at most 3 words", "leaves": ["at most 4 words"]}]} with 3 to 5 branches and at most 3 leaves each.' },
+  };
+  function vizKind(q) { return Object.keys(VIZ).find((k) => VIZ[k].re.test(q || "")) || null; }
+  function vizSVG(kind, d) {
+    const E = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const lines = (t, n, max) => { const out = []; let cur = ""; String(t || "").split(/\s+/).forEach((w) => { if ((cur + " " + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }); if (cur) out.push(cur); return out.slice(0, max || 3); };
+    const T = (x, y, s, cls, anchor) => '<text class="label fade ' + cls + '" x="' + x + '" y="' + y + '"' + (anchor ? ' text-anchor="' + anchor + '"' : "") + ">" + E(s) + "</text>";
+    const L = (x1, y1, x2, y2, cls) => '<path class="stroke draw ' + cls + '" pathLength="1" d="M' + x1 + " " + y1 + " L" + x2 + " " + y2 + '"/>';
+    let o = T(16, 22, d.title || "", "big d1"), y = 44;
+    if (kind === "timeline") {
+      const ev = (d.events || []).slice(0, 7), top = y;
+      ev.forEach((e, i) => {
+        const k = "d" + (2 * i + 3), ls = lines(e.what, 30, 2);
+        o += '<circle class="pop ' + k + '" cx="112" cy="' + (y + 6) + '" r="4.5" fill="currentColor"/>' + T(98, y + 11, e.when, "small " + k, "end");
+        ls.forEach((l, j) => { o += T(126, y + 11 + j * 18, l, k); });
+        y += 18 * ls.length + 22;
+      });
+      o = L(112, top - 4, 112, y - 14, "d1") + o;
+    } else if (kind === "compare") {
+      const xs = [16, 132, 268], W = [110, 128, 128];
+      o += T(xs[1], y + 10, lines(d.a, 18, 1)[0] || "", "big d1") + T(xs[2], y + 10, lines(d.b, 18, 1)[0] || "", "big d1"); y += 22; o += L(16, y, 392, y, "d1"); y += 8;
+      (d.rows || []).slice(0, 6).forEach((r, i) => {
+        if (!Array.isArray(r) || /^aspect$/i.test(r[0]) || /value for|item value/i.test(r[1])) return;
+        const k = "d" + (2 * i + 3), cols = [0, 1, 2].map((c) => lines(r[c], c ? 19 : 15, 3)), h = Math.max(...cols.map((c) => c.length)) * 17 + 12;
+        cols.forEach((c, ci) => c.forEach((l, j) => { o += T(xs[ci], y + 15 + j * 17, l, (ci ? "" : "small ") + k); }));
+        y += h; o += L(16, y, 392, y, "faint " + k); y += 4;
+      });
+    } else if (kind === "cycle") {
+      const st = (d.stages || []).slice(0, 6), n = st.length || 1, cx = 200, cy = y + 140, R = 112;
+      st.forEach((s, i) => {
+        const a = -Math.PI / 2 + (2 * Math.PI * i) / n, k = "d" + (2 * i + 1), px = cx + R * Math.cos(a), py = cy + R * Math.sin(a);
+        const ls = lines(s, 14, 2);
+        o += '<rect class="stroke draw ' + k + '" pathLength="1" x="' + (px - 56).toFixed(1) + '" y="' + (py - 10 - ls.length * 8).toFixed(1) + '" width="112" height="' + (20 + ls.length * 16) + '" rx="12"/>';
+        ls.forEach((l, j) => { o += T(px.toFixed(1), (py + 5 - (ls.length - 1) * 8 + j * 16).toFixed(1), l, k, "middle"); });
+        const a1 = a + 0.42, a2 = a + (2 * Math.PI) / n - 0.42, r2 = R * 0.62;
+        if (n > 1) o += '<path class="stroke draw ' + k + '" pathLength="1" d="M' + (cx + r2 * Math.cos(a1)).toFixed(1) + " " + (cy + r2 * Math.sin(a1)).toFixed(1) + " A" + r2 + " " + r2 + " 0 0 1 " + (cx + r2 * Math.cos(a2)).toFixed(1) + " " + (cy + r2 * Math.sin(a2)).toFixed(1) + '" marker-end="url(#vizArrow)"/>';
+      });
+      o = '<defs><marker id="vizArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10" fill="none" stroke="currentColor" stroke-width="1.6"/></marker></defs>' + o;
+      y = cy + R + 40;
+    } else if (kind === "tree") {
+      const br = (d.branches || []).filter((b) => b && b.name).slice(0, 5), rows = br.map((b) => Math.max(1, (b.leaves || []).slice(0, 3).length)), total = rows.reduce((a, b) => a + b, 0) * 20 + br.length * 16;
+      const ry = y + total / 2, rl = lines(d.root || d.title, 12, 2);
+      o += '<rect class="stroke draw d1" pathLength="1" x="10" y="' + (ry - 14 - rl.length * 8) + '" width="104" height="' + (24 + rl.length * 16) + '" rx="12"/>';
+      rl.forEach((l, j) => { o += T(62, ry + 5 - (rl.length - 1) * 8 + j * 16, l, "d1", "middle"); });
+      let by = y;
+      br.forEach((b, i) => {
+        const k = "d" + (2 * i + 3), lv = (b.leaves || []).slice(0, 3), h = Math.max(1, lv.length) * 20 + 16, my = by + h / 2;
+        o += '<path class="stroke draw ' + k + '" pathLength="1" d="M114 ' + ry + " C150 " + ry + " 140 " + my + " 172 " + my + '"/>' + T(178, my + 5, lines(b.name, 16, 1)[0], k);
+        lv.forEach((l, j) => { o += T(306, by + 16 + j * 20, "· " + lines(l, 14, 1)[0], "small " + k); });
+        by += h;
+      });
+      y = by + 10;
+    }
+    return { o, vb: "0 0 400 " + Math.max(120, Math.ceil(y + 8)) };
+  }
+
   function sketchSVG(key) {
     const P = 'pathLength="1"';
     function delayNum(el) {
@@ -970,6 +1050,7 @@
       }
     }
     if (/^equation:/.test(key)) return eqSVG(key.slice(9));
+    if (/^viz:/.test(key)) { let v; try { v = JSON.parse(decodeURIComponent(key.slice(4))); } catch (e) { v = { k: "", d: {} }; } const m = vizSVG(v.k, v.d || {}); return wrap(m.o, m.vb); }
     if (/^map:/.test(key)) { let sp; try { sp = JSON.parse(decodeURIComponent(key.slice(4))); } catch (e) { sp = { t: "India", layers: [], pts: [] }; } const m = mapSVG(sp); return wrap(m.o, m.vb); }
     if (/^lesson:/.test(key)) {
       let ss; try { ss = JSON.parse(decodeURIComponent(key.slice(7))); } catch (e) { ss = []; }

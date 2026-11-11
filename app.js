@@ -10,6 +10,7 @@
   const AI = window.ThinkerAI;
   const LS = "thinker.v1";
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const isPhone = () => matchMedia("(max-width: 760px)").matches;
 
   /* ---------------- state ---------------- */
   const PERSONAS = [
@@ -287,6 +288,8 @@
       if (!card.querySelector(".draft-text")) st.querySelector(".dots").textContent = stages[Math.min(stages.length - 1, Math.floor(secs / (opts.deep ? 5 : 2)))];
       el.textContent = secs >= 3 ? secs + "s" : ""; }, 1000);
     col.appendChild(card);
+    // phones stack the margin under the note: bring the question and its answer into view
+    if (isPhone()) ((opts.message && [...col.querySelectorAll(".margin-you")].pop()) || card).scrollIntoView({ behavior: "smooth", block: "start" });
 
     const hist = noteHistory(n);
     let res, message = opts.message || "";
@@ -341,16 +344,34 @@
       $("noteBody").appendChild(ex);
     }
     const lastSk = [...$("noteBody").querySelectorAll("[data-sketch]")].pop();
-    if (res.draw && res.sketch && res.sketch !== "none" && !(lastSk && lastSk.dataset.sketch === res.sketch)) { await wait(250); insertSketch(res.sketch); }
+    let placed = null;
+    if (res.draw && res.sketch && res.sketch !== "none" && !(lastSk && lastSk.dataset.sketch === res.sketch)) { await wait(250); placed = insertSketch(res.sketch); }
     if (res.code) {
       const pre = document.createElement("pre"); pre.className = "code-block"; pre.setAttribute("contenteditable", "false");
       if (res.code.lang) pre.dataset.lang = res.code.lang;
       const code = document.createElement("code"); code.textContent = res.code.src; pre.appendChild(code);
       $("noteBody").appendChild(pre); n.body = serializeBody();
+      placed = placed || pre;
+    }
+    if (placed && isPhone()) {
+      const go = document.createElement("button"); go.className = "follow-chip"; go.textContent = (res.code ? "See the code" : "See the drawing") + " ↑";
+      go.onclick = (ev) => { ev.stopPropagation(); placed.scrollIntoView({ behavior: "smooth", block: "start" }); };
+      body.insertBefore(go, chip);
+      // the insert above pushed the answer down; put it back in view
+      (([...col.querySelectorAll(".margin-you")].pop()) || card).scrollIntoView({ block: "start" });
     }
     if (voiceOut) speak(shorten(r.text));
     responding = false;
     save(); renderSidebar();
+    if (res.later) {
+      const st = document.createElement("span"); st.className = "status-line later-line"; st.innerHTML = '<svg class="quill"><use href="#i-quill"/></svg><span class="dots">' + esc(res.laterLabel || "Drawing it") + "</span>";
+      body.insertBefore(st, chip);
+      const key = await res.later; st.remove();
+      if (key && active() === n) {
+        const sk = insertSketch(key); save();
+        if (isPhone()) { const go = document.createElement("button"); go.className = "follow-chip"; go.textContent = "See the drawing ↑"; go.onclick = (ev) => { ev.stopPropagation(); sk.scrollIntoView({ behavior: "smooth", block: "start" }); }; body.insertBefore(go, chip); }
+      }
+    }
   }
 
   function insertSketch(key) {
@@ -363,6 +384,7 @@
     mountSketch(div, key, { playNow: true });
     div._mounted = true;
     n.body = serializeBody();
+    return div;
   }
 
   function plainText(html) { const d = document.createElement("div"); d.innerHTML = html || ""; return d.textContent || ""; }
